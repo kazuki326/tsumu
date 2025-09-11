@@ -1,4 +1,4 @@
-/* 既存の見た目 + 「新規登録はこちら」リンク/サブ行/トースト */
+/* 既存スタイルに「タブ」と「棒グラフ」を追加 */
 
 :root {
   --bg: #f7f9ff;
@@ -7,6 +7,7 @@
   --accent: #ff7fb0;
   --ok: #1b8a3a;
   --ng: #d33;
+  --muted: #6b7280;
 }
 
 * { box-sizing: border-box; }
@@ -24,6 +25,7 @@ body {
 .container { max-width: 980px; margin: 32px auto; padding: 0 16px; }
 h1 { margin: 0 0 16px; font-weight: 900; letter-spacing: .5px; text-shadow: 0 3px 0 #fff8; }
 h2, h3 { margin: 8px 0 12px; }
+.muted { color: var(--muted); font-size: 12px; margin-top: 8px; }
 
 .card {
   background: var(--card);
@@ -56,13 +58,7 @@ button {
 }
 button:disabled { opacity: .6; cursor: not-allowed; }
 button.ghost { background: #eef1ff; color: #4a57e2; }
-
-button.link {
-  background: transparent;
-  color: #2b6cb0;
-  text-decoration: underline;
-  padding: 8px 0;
-}
+button.link { background: transparent; color: #2b6cb0; text-decoration: underline; padding: 8px 0; }
 
 .grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
@@ -73,9 +69,7 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
 .neg { color: var(--ng); }
 
 ol { margin: 0; padding-left: 22px; }
-li { display: flex; justify-content: space-between; padding: 6px 0; }
-
-footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
+li { padding: 6px 0; }
 
 /* トースト */
 .toast {
@@ -92,3 +86,51 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
   font-weight: 600;
 }
 .toast.error { background: #fff2f2; color: #b3261e; }
+
+/* タブ */
+.tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.tab {
+  background: #eef1ff;
+  color: #4a57e2;
+  border: none;
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 700;
+}
+.tab.active {
+  background: #4a57e2;
+  color: #fff;
+}
+
+/* ランキング＋棒グラフ */
+.rank-wrap { margin-top: 6px; }
+.rank-list { list-style: none; padding: 0; margin: 0; }
+.rank-list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 0;
+}
+.rank-name { font-weight: 600; }
+.rank-value { font-variant-numeric: tabular-nums; }
+.bar {
+  grid-column: 1 / -1;
+  height: 10px;
+  background: #eef1ff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  border-radius: 8px;
+  transition: width .3s ease;
+}

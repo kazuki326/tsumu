@@ -1,4 +1,4 @@
-// src/api.js — 共通APIラッパ（TZ送信・エラーハンドリング込み）
+// src/api.js — APIラッパ（ランキング拡張対応）
 
 const BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
@@ -23,10 +23,19 @@ async function req(path, init = {}) {
 }
 
 export const api = {
-  status:        ()           => req("/api/status"),
-  register:      (name, pin)  => req("/api/register", { method: "POST", body: JSON.stringify({ name, pin }) }),
-  login:         (name, pin)  => req("/api/login",    { method: "POST", body: JSON.stringify({ name, pin }) }),
-  postCoins:     (coins)      => req("/api/coins",    { method: "POST", body: JSON.stringify({ coins }) }),
-  myCoins:       (days = 30)  => req(`/api/coins?days=${days}`),
-  board:         (date)       => req(`/api/board${date ? `?date=${date}` : ""}`),
+  status:       ()            => req("/api/status"),
+  register:     (name, pin)   => req("/api/register", { method: "POST", body: JSON.stringify({ name, pin }) }),
+  login:        (name, pin)   => req("/api/login",    { method: "POST", body: JSON.stringify({ name, pin }) }),
+  postCoins:    (coins)       => req("/api/coins",    { method: "POST", body: JSON.stringify({ coins }) }),
+  myCoins:      (days = 30)   => req(`/api/coins?days=${days}`),
+  board:        (opts = {})   => {
+    // 互換: board(dateString) もOK
+    if (typeof opts === "string") return req(`/api/board?date=${opts}`);
+    const params = new URLSearchParams();
+    if (opts.date) params.set("date", opts.date);
+    if (opts.mode) params.set("mode", opts.mode);
+    if (opts.periodDays) params.set("periodDays", String(opts.periodDays));
+    const q = params.toString();
+    return req(`/api/board${q ? `?${q}` : ""}`);
+  },
 };
