@@ -5,7 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-# Pages デプロイに必要
 permissions:
   contents: read
   pages: write
@@ -22,23 +21,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
           cache: 'npm'
 
-      # ★ ここが重要：postinstall を無視（server の依存を入れない）
-      - name: Install deps (skip postinstall)
-        run: npm ci --ignore-scripts
+      # 本番API URLを Actions Variables から注入
+      - name: Inject .env.production
+        run: echo "VITE_API_BASE=${{ vars.VITE_API_BASE }}" > .env.production
 
-      # 本番APIのURLをSecretから注入（推奨）
-      - name: Set .env.production
-        run: |
-          echo "VITE_API_BASE=${{ secrets.VITE_API_BASE }}" > .env.production
+      - name: Install deps
+        run: npm ci          # ← ここから --ignore-scripts を外す！
 
       - name: Build
         run: npm run build
+
+      - name: Add 404.html for SPA
+        run: cp dist/index.html dist/404.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -46,11 +46,11 @@ jobs:
           path: dist
 
   deploy:
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4

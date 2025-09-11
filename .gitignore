@@ -26,3 +26,10 @@ dist-ssr
 
 .env.*
 server/coins.db
+
+node_modules
+server/node_modules
+dist
+*.db
+server/*.db
+.env*
