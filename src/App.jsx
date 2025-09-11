@@ -258,9 +258,11 @@ function MyHistoryTable({ rows }) {
   );
 }
 
+
 function LeaderboardCard({ boardTab, setBoardTab, board, boardDate }) {
   return (
-    <>
+    // ← 見出しを含めて rank-box の中に入れる
+    <div className="rank-box">
       <h3>ランキング</h3>
       <div className="tabs">
         <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数</button>
@@ -268,14 +270,13 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate }) {
         <button className={`tab ${boardTab==="7d"?"active":""}`}    onClick={()=>setBoardTab("7d")}>7日間増加</button>
         <button className={`tab ${boardTab==="30d"?"active":""}`}   onClick={()=>setBoardTab("30d")}>30日間増加</button>
       </div>
-      {/* ★ ランキングを枠で囲む */}
-      <div className="rank-box">
-        <RankListAndBars data={board} unit={labelForTab(boardTab)} />
-        <p className="muted">基準日: {boardDate || "取得中…"}（締切済み日の集計）</p>
-      </div>
-    </>
+
+      <RankListAndBars data={board} unit={labelForTab(boardTab)} />
+      <p className="muted">基準日: {boardDate || "取得中…"}（締切済み日の集計）</p>
+    </div>
   );
 }
+
 
 function labelForTab(tab) {
   if (tab==="raw") return "枚";
