@@ -8,8 +8,7 @@
     "dev:web": "vite",
     "dev:api": "npm --prefix server run dev",
     "build": "vite build",
-    "preview": "vite preview --port 5173",
-    "postinstall": "npm --prefix server i"
+    "preview": "vite preview --port 5173"
   },
   "dependencies": {
     "react": "^18.3.1",
