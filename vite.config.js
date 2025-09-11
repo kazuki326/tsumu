@@ -1,7 +1,9 @@
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
-// https://vite.dev/config/
+// GitHub Pages が "https://<user>.github.io/<repo>/" の場合、base を "/<repo>/" に。
+// ユーザーページなら "/" のままでOK。
 export default defineConfig({
   plugins: [react()],
-})
+  base: "/<REPO_NAME>/",    // ← リポジトリ名に置換（例: "/tsumu/"）
+});
