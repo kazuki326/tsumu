@@ -5,5 +5,5 @@ import react from "@vitejs/plugin-react";
 // ユーザーページなら "/" のままでOK。
 export default defineConfig({
   plugins: [react()],
-  base: "/<REPO_NAME>/",    // ← リポジトリ名に置換（例: "/tsumu/"）
+  base: "/tsumu/",    // ← リポジトリ名に置換（例: "/tsumu/"）
 });

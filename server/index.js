@@ -8,14 +8,12 @@ const app = express();
 app.use(express.json());
 
 // ====== CORS ======
+
 const allowOrigin = (origin) => {
-  if (!origin) return true; // curl等
+  if (!origin) return true;
   return (
-    origin.includes("localhost") ||
-    origin.includes("127.0.0.1") ||
-    origin.includes("github.io") ||
-    origin.includes("vercel.app") ||
-    origin.includes("netlify.app")
+    origin === "https://kazuki326.github.io" ||  // ← Pages のオリジン
+    origin.includes("localhost")
   );
 };
 app.use(
