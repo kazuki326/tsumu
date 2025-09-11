@@ -1,3 +1,5 @@
+/* src\index.css */
+
 :root { --bg:#fff5fb; --card:#fff; --ink:#333; --accent:#ff6fa8; --accent2:#7fd7ff; }
 *{ box-sizing:border-box; }
 body{
@@ -24,3 +26,18 @@ ol{ margin:0; padding-left:20px; }
 ol li{ display:flex; justify-content:space-between; padding:6px 0; }
 footer{ margin-top:16px; opacity:.6; font-size:12px; }
 @media (max-width:800px){ .grid{ grid-template-columns:1fr; } }
+
+
+/* ==== 背景画像（上に淡いグラデ＋読みやすさ用の薄い白） ==== */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.85)),
+    url("https://e0.pxfuel.com/wallpapers/958/622/desktop-wallpaper-tsum-header-tsum-tsum-background-disney-tsum-tsum.jpg")
+      center/cover no-repeat fixed;
+  /* モバイルでのチラつき対策 */
+  transform: translateZ(0);
+}
