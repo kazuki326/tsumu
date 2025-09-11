@@ -1,4 +1,4 @@
-// server/index.js — TSUMU COINS API (ランキング: raw/daily/period)
+// server/index.js — TSUMU COINS API（前日比の初回補正＆ランキングモード）
 
 import express from "express";
 import cors from "cors";
@@ -12,11 +12,11 @@ const app = express();
 app.use(express.json());
 app.use(helmet());
 
-// CORS（GitHub Pages / ローカル）
+// ===== CORS =====
 const allowOrigin = (origin) => {
   if (!origin) return true;
   return (
-    origin === "https://kazuki326.github.io" ||
+    origin === "https://kazuki326.github.io" || // GitHub Pages
     origin === "http://localhost:5173" ||
     origin === "http://127.0.0.1:5173" ||
     origin.includes("localhost")
@@ -29,9 +29,9 @@ app.use(
   })
 );
 
-// 基本設定
+// ===== Config =====
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
-const DB_PATH = process.env.DB_PATH || "./coins.db"; // Render 永続なら /var/data/coins.db
+const DB_PATH = process.env.DB_PATH || "./coins.db";
 const PORT = Number(process.env.PORT || 3001);
 const DEFAULT_TZ = "Asia/Tokyo";
 
@@ -54,7 +54,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_ci ON users(lower(name));
 CREATE TABLE IF NOT EXISTS coin_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
-  date_ymd TEXT NOT NULL,   -- 'YYYY-MM-DD'（ユーザーTZ基準）
+  date_ymd TEXT NOT NULL,   -- YYYY-MM-DD（ユーザーTZ基準）
   coins INTEGER NOT NULL,   -- その日のコイン数
   created_at TEXT NOT NULL,
   UNIQUE(user_id, date_ymd),
@@ -65,7 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_coin_logs_user_date ON coin_logs(user_id, date_ym
 
 const nowISO = () => new Date().toISOString();
 
-// 任意TZの YYYY-MM-DD
+// 任意TZの YYYY-MM-DD 文字列
 const ymdInTZ = (tz = DEFAULT_TZ, d = new Date()) => {
   const parts = new Intl.DateTimeFormat("ja-JP", {
     timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit"
@@ -76,7 +76,7 @@ const ymdInTZ = (tz = DEFAULT_TZ, d = new Date()) => {
   return `${y}-${m}-${day}`;
 };
 
-// TZの時刻（h,m）
+// 時刻（時:分）
 const hmInTZ = (tz = DEFAULT_TZ, d = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit"
@@ -86,13 +86,13 @@ const hmInTZ = (tz = DEFAULT_TZ, d = new Date()) => {
   return { h, m };
 };
 
-// 当日編集可？（~23:58までOK。23:59になったら締切）
+// 23:59 までは当日編集可
 const canEditToday = (tz = DEFAULT_TZ) => {
   const { h, m } = hmInTZ(tz);
   return h < 23 || (h === 23 && m < 59);
 };
 
-// 直近の「締切済み日」
+// 直近の「締切済み日」（日中は前日、23:59以降は当日）
 const lastFinalizedDate = (tz = DEFAULT_TZ) => {
   if (canEditToday(tz)) {
     const d = new Date();
@@ -119,6 +119,7 @@ const auth = (req, res, next) => {
 // ===== API =====
 app.get("/", (_req, res) => res.json({ ok: true }));
 
+// クライアント初期情報
 app.get("/api/status", (req, res) => {
   const tz = req.header("X-Timezone") || DEFAULT_TZ;
   res.json({
@@ -165,7 +166,7 @@ app.get("/api/me", auth, (req, res) => {
   res.json({ id: req.user.uid, name: req.user.name });
 });
 
-// 当日コイン（当日中のみ編集可）
+// 当日コイン（当日中のみ上書き可）
 app.post("/api/coins", auth, (req, res) => {
   const coins = Number(req.body?.coins);
   if (!Number.isInteger(coins) || coins < 0)
@@ -175,8 +176,9 @@ app.post("/api/coins", auth, (req, res) => {
   if (!canEditToday(tz)) return res.status(403).json({ error: "today is finalized at 23:59" });
 
   const date_ymd = ymdInTZ(tz);
-  const existing = db.prepare("SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?")
-    .get(req.user.uid, date_ymd);
+  const existing = db.prepare(
+    "SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?"
+  ).get(req.user.uid, date_ymd);
 
   if (existing) {
     db.prepare("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?")
@@ -190,10 +192,12 @@ app.post("/api/coins", auth, (req, res) => {
     "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1"
   ).get(req.user.uid, date_ymd);
 
-  res.json({ date_ymd, coins, diff: prev ? coins - prev.coins : 0 });
+  // 初回日は prev = null → 差分は 0 にする
+  const diff = prev ? coins - prev.coins : 0;
+  res.json({ date_ymd, coins, diff });
 });
 
-// 自分の履歴（直近N日）
+// 自分の履歴（直近N日）— 初回日の前日比は 0
 app.get("/api/coins", auth, (req, res) => {
   const days = Math.min(Number(req.query.days || 30), 365);
   const tz = req.header("X-Timezone") || DEFAULT_TZ;
@@ -214,7 +218,7 @@ app.get("/api/coins", auth, (req, res) => {
     )
     SELECT date_ymd,
            COALESCE(coins, 0) AS coins,
-           COALESCE(COALESCE(coins, prev) - COALESCE(prev, 0), 0) AS diff
+           CASE WHEN prev IS NULL THEN 0 ELSE (COALESCE(coins, prev) - prev) END AS diff
     FROM base
     ORDER BY date_ymd DESC
   `).all({ uid: req.user.uid, today, days });
@@ -222,26 +226,20 @@ app.get("/api/coins", auth, (req, res) => {
   res.json(rows);
 });
 
-// ランキング（モード切替）
-/*
-  mode:
-    - raw   : 指定日の「素直なコイン数」（その日の値）
-    - daily : 前日比（今日-昨日）
-    - period: 期間合計（start..date の SUM）。periodDays が必要（例:7,30）
-  date: YYYY-MM-DD（省略時は「直近の締切済み日」）
-*/
+// ランキング（date, mode, periodDays）
+// mode: raw=「その日のコイン数」 / daily=「前日比」 / period=期間合計
 app.get("/api/board", (req, res) => {
   const tz = req.header("X-Timezone") || DEFAULT_TZ;
   const finalized = lastFinalizedDate(tz);
-  const date = (req.query.date || finalized).slice(0,10);
-  const mode = String(req.query.mode || "daily"); // 既定=前日比
+  const date = (req.query.date || finalized).slice(0, 10);
+  const mode = String(req.query.mode || "daily");
   const periodDays = Math.min(Math.max(Number(req.query.periodDays || 7), 2), 365);
+
+  // 期間開始日
   const start = (() => {
-    const d = new Date(`${date}T00:00:00Z`);
-    // YYYY-MM-DD はTZ不定なので安全に計算: Date.UTCに近い扱い
     const local = new Date(`${date}T00:00:00`);
     local.setDate(local.getDate() - (periodDays - 1));
-    return local.toISOString().slice(0,10);
+    return local.toISOString().slice(0, 10);
   })();
 
   let rows = [];
@@ -254,18 +252,29 @@ app.get("/api/board", (req, res) => {
       ORDER BY value DESC, name ASC
     `).all({ date });
   } else if (mode === "daily") {
+    // 前日が無いユーザーは 0（初回補正）
     rows = db.prepare(`
       WITH u AS (SELECT id, name FROM users)
-      SELECT u.name,
-             (COALESCE((SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd=@date),
-                       (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < @date ORDER BY date_ymd DESC LIMIT 1),
-                       0)
-              - COALESCE((SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < @date ORDER BY date_ymd DESC LIMIT 1), 0)
-             ) AS value
+      SELECT
+        u.name,
+        CASE
+          WHEN (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < @date ORDER BY date_ymd DESC LIMIT 1) IS NULL
+            THEN 0
+          ELSE
+            (
+              COALESCE(
+                (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd=@date),
+                (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < @date ORDER BY date_ymd DESC LIMIT 1)
+              )
+              -
+              (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < @date ORDER BY date_ymd DESC LIMIT 1)
+            )
+        END AS value
       FROM u
       ORDER BY value DESC, name ASC
     `).all({ date });
-  } else { // period
+  } else {
+    // 期間合計（start..date の SUM）
     rows = db.prepare(`
       WITH u AS (SELECT id, name FROM users)
       SELECT u.name,
@@ -279,7 +288,7 @@ app.get("/api/board", (req, res) => {
   res.json({ date_ymd: date, mode, periodDays, board, finalized_date: finalized });
 });
 
-// 共通エラーハンドラ
+// 共通エラー
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: "server error" });

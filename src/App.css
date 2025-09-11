@@ -1,4 +1,4 @@
-/* src/App.css — ランキング枠（rank-box）を追加。タブ名はJSX側で「コイン数」。 */
+/* src/App.css — ランキング枠あり（太さはそのまま） */
 
 :root {
   --bg: #f7f9ff;
@@ -66,7 +66,7 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
 .pos { color: var(--ok); }
 .neg { color: var(--ng); }
 
-/* トースト通知 */
+/* トースト */
 .toast {
   position: sticky;
   top: 8px;
@@ -82,7 +82,7 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
 }
 .toast.error { background: #fff2f2; color: #b3261e; }
 
-/* タブ（共通） */
+/* タブ */
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .tab {
   background: #eef1ff;
@@ -99,7 +99,7 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
 .tabs.secondary .tab { background: #f4f6ff; color: #3141c5; }
 .tabs.secondary .tab.active { background: #3141c5; color: #fff; }
 
-/* ランキング枠（ここが追加） */
+/* ランキング枠（太さそのまま） */
 .rank-box {
   border: 2px solid #e6e8f0;
   border-radius: 16px;
@@ -117,23 +117,11 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
   align-items: center;
   padding: 8px 0;
 }
-.rank-list li + li { border-top: 1px solid #f5f6fb; } /* 行の区切り */
+.rank-list li + li { border-top: 1px solid #f5f6fb; }
 .rank-name { font-weight: 600; }
 .rank-value { font-variant-numeric: tabular-nums; }
 
-.bar {
-  grid-column: 1 / -1;
-  height: 10px;
-  background: #eef1ff;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.bar-fill {
-  height: 100%;
-  width: 0%;
-  background: var(--accent);
-  border-radius: 8px;
-  transition: width .3s ease;
-}
+.bar { grid-column: 1 / -1; height: 10px; background: #eef1ff; border-radius: 8px; overflow: hidden; }
+.bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 8px; transition: width .3s ease; }
 
 footer { opacity: .6; padding: 12px 2px; font-size: 12px; }

@@ -1,10 +1,10 @@
-// src/App.jsx — マイページ内に「履歴 / 全体ランキング」タブ。ランキング枠で囲む＋タブ名「コイン数」
+// src/App.jsx — 「今日（暫定）」自動切替 / 初回前日比の補正表示 / ランキング見出しを枠内
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import "./App.css";
 
-// 軽量ハッシュルーター
+// 簡易ハッシュルーター
 const useHashRoute = () => {
   const get = () => window.location.hash.replace("#", "") || "/";
   const [route, setRoute] = useState(get);
@@ -18,7 +18,7 @@ const useHashRoute = () => {
 };
 
 export default function App() {
-  // 共通UI状態
+  // 共通UI
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [coins, setCoins] = useState("");
@@ -29,15 +29,18 @@ export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
   const loggedIn = useMemo(() => !!token, [token]);
 
-  // マイページ表示用
+  // ステータス
   const [todayYmd, setTodayYmd] = useState("");
   const [canEdit, setCanEdit] = useState(true);
+
+  // 自分の履歴
   const [myHistory, setMyHistory] = useState([]);
 
   // ランキング
-  const [boardDate, setBoardDate] = useState("");
-  const [board, setBoard] = useState([]);
   const [boardTab, setBoardTab] = useState("daily"); // "raw" | "daily" | "7d" | "30d"
+  const [board, setBoard] = useState([]);
+  const [boardDate, setBoardDate] = useState("");
+  const [isProvisional, setIsProvisional] = useState(false); // 今日(暫定)表示フラグ
   const modeMap = {
     raw: { mode: "raw" },
     daily: { mode: "daily" },
@@ -45,12 +48,12 @@ export default function App() {
     "30d": { mode: "period", periodDays: 30 },
   };
 
-  // マイページ内タブ（履歴 or ランキング）
+  // マイページ内タブ
   const [meTab, setMeTab] = useState("history"); // "history" | "leaderboard"
 
   const { route, push } = useHashRoute();
 
-  // データロード
+  // ===== ロード =====
   const loadStatus = async () => {
     const st = await api.status();
     if (!st?.error) {
@@ -59,22 +62,28 @@ export default function App() {
       setBoardDate(st.board_date_ymd || "");
     }
   };
+
   const loadMy = async () => {
     if (!loggedIn) { setMyHistory([]); return; }
     const me = await api.myCoins(14);
     setMyHistory(Array.isArray(me) ? me : []);
   };
+
+  // ★ 日中は「今日（暫定）」でランキング表示、締切後は自動で確定日へ
   const loadBoard = async () => {
-    const b = await api.board({ ...modeMap[boardTab] });
+    const opts = { ...modeMap[boardTab] };
+    if (todayYmd && canEdit) opts.date = todayYmd; // 暫定表示
+    const b = await api.board(opts);
     setBoard(Array.isArray(b?.board) ? b.board : []);
     if (b?.date_ymd) setBoardDate(b.date_ymd);
+    setIsProvisional(!!(todayYmd && canEdit && b?.date_ymd === todayYmd));
   };
 
   useEffect(() => { loadStatus(); }, []);
   useEffect(() => { loadMy(); }, [loggedIn]);
-  useEffect(() => { loadBoard(); }, [boardTab, loggedIn]);
+  useEffect(() => { loadBoard(); }, [boardTab, loggedIn, todayYmd, canEdit]);
 
-  // 認証処理
+  // ===== 認証 =====
   const doLogin = async () => {
     if (!name.trim() || pin.trim().length < 4) return alert("名前と4桁以上のPINを入力してね");
     setBusy(true);
@@ -90,6 +99,7 @@ export default function App() {
       }
     } finally { setBusy(false); }
   };
+
   const doSignup = async (signupName, signupPin) => {
     setBusy(true);
     try {
@@ -106,7 +116,7 @@ export default function App() {
     } finally { setBusy(false); }
   };
 
-  // 入力
+  // ===== 入力 =====
   const submitCoins = async () => {
     const n = Number(coins);
     if (!Number.isInteger(n) || n < 0) return alert("0以上の整数で入力してね");
@@ -122,7 +132,7 @@ export default function App() {
   };
   const onCoinsKeyDown = (e) => { if (e.key === "Enter" && !busy) submitCoins(); };
 
-  // ルート整合
+  // ルーティング整合
   useEffect(() => {
     if (!loggedIn && route === "/me") push("/");
     if (loggedIn && (route === "/" || route === "/signup")) push("/me");
@@ -133,7 +143,7 @@ export default function App() {
       <h1>TSUMU COINS</h1>
       {flash.text && <div className={`toast ${flash.type}`}>{flash.text}</div>}
 
-      {/* ログイン画面 */}
+      {/* ログイン */}
       {route === "/" && (
         <>
           <div className="card">
@@ -149,12 +159,13 @@ export default function App() {
             </div>
           </div>
 
-          {/* 公開トップでも全体ランキングを表示 */}
+          {/* トップでもランキング表示（見出し含め枠内） */}
           <LeaderboardCard
             boardTab={boardTab}
             setBoardTab={setBoardTab}
             board={board}
             boardDate={boardDate}
+            isProvisional={isProvisional}
           />
         </>
       )}
@@ -189,16 +200,14 @@ export default function App() {
             </div>
           </div>
 
-          {/* マイページ内タブ：自分の履歴 / 全体ランキング */}
+          {/* マイページ内タブ：履歴 / ランキング */}
           <div className="card">
             <div className="tabs secondary">
               <button className={`tab ${meTab==="history"?"active":""}`} onClick={()=>setMeTab("history")}>自分の履歴</button>
               <button className={`tab ${meTab==="leaderboard"?"active":""}`} onClick={()=>setMeTab("leaderboard")}>全体ランキング</button>
             </div>
 
-            {meTab === "history" && (
-              <MyHistoryTable rows={myHistory} />
-            )}
+            {meTab === "history" && <MyHistoryTable rows={myHistory} />}
 
             {meTab === "leaderboard" && (
               <LeaderboardCard
@@ -206,6 +215,7 @@ export default function App() {
                 setBoardTab={setBoardTab}
                 board={board}
                 boardDate={boardDate}
+                isProvisional={isProvisional}
               />
             )}
           </div>
@@ -258,10 +268,8 @@ function MyHistoryTable({ rows }) {
   );
 }
 
-
-function LeaderboardCard({ boardTab, setBoardTab, board, boardDate }) {
+function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisional }) {
   return (
-    // ← 見出しを含めて rank-box の中に入れる
     <div className="rank-box">
       <h3>ランキング</h3>
       <div className="tabs">
@@ -272,11 +280,12 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate }) {
       </div>
 
       <RankListAndBars data={board} unit={labelForTab(boardTab)} />
-      <p className="muted">基準日: {boardDate || "取得中…"}（締切済み日の集計）</p>
+      <p className="muted">
+        基準日: {boardDate || "取得中…"}{isProvisional ? "（今日・暫定）" : "（締切済み日の集計）"}
+      </p>
     </div>
   );
 }
-
 
 function labelForTab(tab) {
   if (tab==="raw") return "枚";

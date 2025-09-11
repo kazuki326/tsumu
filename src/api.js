@@ -1,4 +1,4 @@
-// src/api.js — APIラッパ（ランキング拡張対応）
+// src/api.js — X-Timezone ヘッダ付き / ランキング拡張対応
 
 const BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
@@ -29,7 +29,6 @@ export const api = {
   postCoins:    (coins)       => req("/api/coins",    { method: "POST", body: JSON.stringify({ coins }) }),
   myCoins:      (days = 30)   => req(`/api/coins?days=${days}`),
   board:        (opts = {})   => {
-    // 互換: board(dateString) もOK
     if (typeof opts === "string") return req(`/api/board?date=${opts}`);
     const params = new URLSearchParams();
     if (opts.date) params.set("date", opts.date);
