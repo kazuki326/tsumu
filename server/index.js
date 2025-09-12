@@ -3,6 +3,7 @@
 // ・「前日比」…初回日は 0 に補正
 // ・ランキング…raw/daily/period(7日/30日 等)
 // ・JST 23:59 までは当日編集OK。日中はフロントから「今日(暫定)」でランキング取得
+// ・/api/board に軽いキャッシュヘッダ（public, max-age=60, stale-while-revalidate=86400）
 
 import "dotenv/config";
 import express from "express";
@@ -26,7 +27,7 @@ const allowOrigin = (origin) => {
     origin === "https://kazuki326.github.io" || // GitHub Pages
     origin === "http://localhost:5173" ||
     origin === "http://127.0.0.1:5173" ||
-    origin.includes("localhost")
+    origin?.includes("localhost")
   );
 };
 app.use(
@@ -42,7 +43,6 @@ const PORT = Number(process.env.PORT || 3001);
 const DEFAULT_TZ = "Asia/Tokyo";
 
 // ===== Postgres =====
-// Render の外部 URL を DATABASE_URL に設定しておく
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes("render.com")
@@ -214,7 +214,6 @@ app.get("/api/coins", auth, async (req, res) => {
   const tz = req.header("X-Timezone") || DEFAULT_TZ;
   const today = ymdInTZ(tz);
 
-  // generate_series で日付列を作って、当日の値＆前日値を引く
   const { rows } = await pool.query(
     `
     WITH series AS (
@@ -306,6 +305,10 @@ app.get("/api/board", async (req, res) => {
   }
 
   const board = rows.map((r) => ({ name: r.name, value: Number(r.value) || 0 }));
+
+  // ★ 軽いキャッシュヘッダ（ブラウザ/CDNにヒント）
+  res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=86400");
+
   res.json({ date_ymd: date, mode, periodDays, board, finalized_date: finalized });
 });
 

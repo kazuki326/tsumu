@@ -1,4 +1,5 @@
-// src/App.jsx — 「今日（暫定）」自動切替 / 初回前日比の補正表示 / ランキング見出しを枠内
+// src/App.jsx — キャッシュ優先ランキング対応（「キャッシュ表示」バッジ）
+// 既存のUI（マイページ/履歴/ランキング/暫定表示/初回前日比0）もそのまま
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
@@ -40,7 +41,8 @@ export default function App() {
   const [boardTab, setBoardTab] = useState("daily"); // "raw" | "daily" | "7d" | "30d"
   const [board, setBoard] = useState([]);
   const [boardDate, setBoardDate] = useState("");
-  const [isProvisional, setIsProvisional] = useState(false); // 今日(暫定)表示フラグ
+  const [isProvisional, setIsProvisional] = useState(false); // 今日(暫定)
+  const [staleBoard, setStaleBoard] = useState(false);       // キャッシュ表示中
   const modeMap = {
     raw: { mode: "raw" },
     daily: { mode: "daily" },
@@ -69,7 +71,7 @@ export default function App() {
     setMyHistory(Array.isArray(me) ? me : []);
   };
 
-  // ★ 日中は「今日（暫定）」でランキング表示、締切後は自動で確定日へ
+  // ★ 日中は「今日（暫定）」でランキング表示、締切後は確定日へ
   const loadBoard = async () => {
     const opts = { ...modeMap[boardTab] };
     if (todayYmd && canEdit) opts.date = todayYmd; // 暫定表示
@@ -77,6 +79,7 @@ export default function App() {
     setBoard(Array.isArray(b?.board) ? b.board : []);
     if (b?.date_ymd) setBoardDate(b.date_ymd);
     setIsProvisional(!!(todayYmd && canEdit && b?.date_ymd === todayYmd));
+    setStaleBoard(!!b?._fromCache); // キャッシュからの表示かどうか
   };
 
   useEffect(() => { loadStatus(); }, []);
@@ -166,6 +169,7 @@ export default function App() {
             board={board}
             boardDate={boardDate}
             isProvisional={isProvisional}
+            stale={staleBoard}
           />
         </>
       )}
@@ -216,6 +220,7 @@ export default function App() {
                 board={board}
                 boardDate={boardDate}
                 isProvisional={isProvisional}
+                stale={staleBoard}
               />
             )}
           </div>
@@ -268,10 +273,13 @@ function MyHistoryTable({ rows }) {
   );
 }
 
-function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisional }) {
+function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisional, stale }) {
   return (
     <div className="rank-box">
-      <h3>ランキング</h3>
+      <h3>
+        ランキング
+        {stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
+      </h3>
       <div className="tabs">
         <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数</button>
         <button className={`tab ${boardTab==="daily"?"active":""}`} onClick={()=>setBoardTab("daily")}>前日比</button>
@@ -281,7 +289,8 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
 
       <RankListAndBars data={board} unit={labelForTab(boardTab)} />
       <p className="muted">
-        基準日: {boardDate || "取得中…"}{isProvisional ? "（今日・暫定）" : "（締切済み日の集計）"}
+        基準日: {boardDate || "取得中…"}
+        {isProvisional ? "（今日・暫定）" : "（締切済み日の集計）"}
       </p>
     </div>
   );
