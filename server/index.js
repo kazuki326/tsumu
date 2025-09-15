@@ -1,476 +1,337 @@
-// server/index.js — TSUMU COINS API (Postgres) + series API
-// ・Render Postgres (DATABASE_URL)
-// ・前日比：初回は 0
-// ・ランキング：
-//    - raw …「コイン数」= 各ユーザーの“最後の記録”（日付を問わない）
-//    - daily … 指定日の前日比（初回は 0）
-//    - period … 期間内の日々の前日差を合計（±の“増減”合計）
-// ・/api/board_series … 各モードに対応した時系列（折れ線グラフ用）
-// ・JST 23:59 までは当日編集OK（日中は「今日(暫定)」で表示）
-// ・/api/board に軽いキャッシュヘッダ
-
-import "dotenv/config";
+// server/index.js
 import express from "express";
 import cors from "cors";
-import helmet from "helmet";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
-import pkg from "pg";
+import Database from "better-sqlite3";
 
-const { Pool } = pkg;
-
+// ================== 基本設定 ==================
 const app = express();
 app.use(express.json());
-app.use(helmet());
 
-// ===== CORS =====
-const allowOrigin = (origin) => {
-  if (!origin) return true;
-  return (
-    origin === "https://kazuki326.github.io" ||
-    origin === "http://localhost:5173" ||
-    origin === "http://127.0.0.1:5173" ||
-    origin?.includes("localhost")
-  );
-};
-app.use(
-  cors({
-    origin: (origin, cb) => cb(null, allowOrigin(origin)),
-    credentials: false
-  })
-);
-
-// ===== Config =====
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
-const PORT = Number(process.env.PORT || 3001);
-const DEFAULT_TZ = "Asia/Tokyo";
+const DB_PATH = process.env.DB_PATH || "./coins.db";
+const PORT = process.env.PORT || 3001;
+const TZ = "Asia/Tokyo";
 
-// ===== Postgres =====
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL?.includes("render.com")
-    ? { rejectUnauthorized: false }
-    : undefined
-});
+// ================== CORS（プリフライト含め強化） ==================
+const ALLOWLIST = [
+  "https://kazuki326.github.io", // GitHub Pages
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+];
 
-// ===== Migrate =====
-async function migrate() {
-  const sql = `
-  CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    pin_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL
-  );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_ci ON users(lower(name));
+const corsDelegate = (req, cb) => {
+  const origin = req.header("Origin") || "";
+  const ok =
+    !origin ||
+    ALLOWLIST.includes(origin) ||
+    origin.includes("localhost") ||
+    origin.includes("127.0.0.1");
+  cb(null, {
+    origin: ok,
+    credentials: false,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Timezone"],
+    optionsSuccessStatus: 204,
+  });
+};
 
-  CREATE TABLE IF NOT EXISTS coin_logs (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    date_ymd DATE NOT NULL,
-    coins INTEGER NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    CONSTRAINT coin_logs_user_date UNIQUE (user_id, date_ymd)
-  );
-  CREATE INDEX IF NOT EXISTS idx_coin_logs_user_date ON coin_logs(user_id, date_ymd);
-  `;
-  await pool.query(sql);
-  await pool.query(`SET TIME ZONE '${DEFAULT_TZ}';`);
-  console.log("✅ Migrated & timezone set:", DEFAULT_TZ);
-}
+app.use(cors(corsDelegate));
+app.options("*", cors(corsDelegate)); // ← OPTIONSにも必ず応答
 
-// ===== Utils =====
+// ================== DB ==================
+const db = new Database(DB_PATH);
+db.pragma("foreign_keys = ON");
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  pin_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_ci ON users(lower(name));
+
+CREATE TABLE IF NOT EXISTS coin_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  date_ymd TEXT NOT NULL,
+  coins INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(user_id, date_ymd),
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+`);
+
+// ================== Utils ==================
 const nowISO = () => new Date().toISOString();
-const ymdInTZ = (tz = DEFAULT_TZ, d = new Date()) => {
-  const parts = new Intl.DateTimeFormat("ja-JP", {
-    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit"
-  }).formatToParts(d);
-  const y = parts.find(p => p.type === "year").value;
-  const m = parts.find(p => p.type === "month").value;
-  const day = parts.find(p => p.type === "day").value;
-  return `${y}-${m}-${day}`;
+const jstNow = () => new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
+const jstDateYMD = (d = new Date()) =>
+  new Date(d.toLocaleString("en-US", { timeZone: TZ }))
+    .toISOString()
+    .slice(0, 10);
+
+const addDays = (dateYmd, n) => {
+  const d = new Date(dateYmd + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
 };
-const hmInTZ = (tz = DEFAULT_TZ, d = new Date()) => {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz, hour12: false, hour: "2-digit", minute: "2-digit"
-  }).formatToParts(d);
-  return { h: Number(parts.find(p => p.type==="hour").value), m: Number(parts.find(p => p.type==="minute").value) };
-};
-const canEditToday = (tz = DEFAULT_TZ) => {
-  const { h, m } = hmInTZ(tz);
-  return h < 23 || (h === 23 && m < 59);
-};
-const lastFinalizedDate = (tz = DEFAULT_TZ) => {
-  if (canEditToday(tz)) {
-    const d = new Date(); d.setDate(d.getDate()-1);
-    return ymdInTZ(tz, d);
+const listDates = (startYmd, endYmd) => {
+  const out = [];
+  let d = startYmd;
+  while (d <= endYmd) {
+    out.push(d);
+    d = addDays(d, 1);
   }
-  return ymdInTZ(tz);
+  return out;
+};
+
+// 23:59までは「今日」は暫定。締切済みの最終確定日はそれ以前
+const lastFinalizedYmd = () => {
+  const now = jstNow();
+  const h = now.getHours(), m = now.getMinutes();
+  if (h < 23 || (h === 23 && m < 59)) {
+    const today = now.toISOString().slice(0, 10);
+    return addDays(today, -1);
+  }
+  return now.toISOString().slice(0, 10);
 };
 
 const issueToken = (user) =>
   jwt.sign({ uid: user.id, name: user.name }, JWT_SECRET, { expiresIn: "30d" });
 
-const auth = (req, res, next) => {
+const auth = (req, _res, next) => {
   const h = req.headers.authorization || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : null;
-  try { req.user = jwt.verify(token, JWT_SECRET); next(); }
-  catch { res.status(401).json({ error: "unauthorized" }); }
+  if (!token) return next("route");
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = payload; // { uid, name }
+    next();
+  } catch {
+    next("route");
+  }
 };
 
-// ===== API =====
+// ================== API ==================
+
+// 健康チェック
 app.get("/", (_req, res) => res.json({ ok: true }));
 
-app.get("/api/status", (req, res) => {
-  const tz = req.header("X-Timezone") || DEFAULT_TZ;
+// 追加: クライアントの基準日・締切情報
+app.get("/api/status", (_req, res) => {
+  const today = jstDateYMD();
+  const now = jstNow();
+  const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
   res.json({
-    canEditToday: canEditToday(tz),
-    today_ymd: ymdInTZ(tz),
-    board_date_ymd: lastFinalizedDate(tz),
+    today_ymd: today,
+    canEditToday,
+    board_date_ymd: canEditToday ? today : today, // 表示用。必要に応じて調整
   });
 });
 
-// Register / Login
-app.post("/api/register", async (req, res) => {
+// 新規登録
+app.post("/api/register", (req, res) => {
   const name = String(req.body?.name || "").trim();
   const pin = String(req.body?.pin || "").trim();
-  if (!name || pin.length < 4) return res.status(400).json({ error: "name and 4+ digit pin required" });
+  if (!name || pin.length < 4)
+    return res.status(400).json({ error: "name and 4+ digit pin required" });
   const pin_hash = bcrypt.hashSync(pin, 10);
   try {
-    const { rows } = await pool.query(
-      "INSERT INTO users(name, pin_hash, created_at) VALUES ($1,$2,$3) RETURNING id,name",
-      [name, pin_hash, nowISO()]
-    );
-    const user = rows[0];
+    const info = db
+      .prepare("INSERT INTO users(name, pin_hash, created_at) VALUES (?, ?, ?)")
+      .run(name, pin_hash, nowISO());
+    const user = { id: info.lastInsertRowid, name };
     res.json({ token: issueToken(user), user });
   } catch (e) {
-    if (String(e).includes("idx_users_name_ci")) return res.status(409).json({ error: "name already taken" });
-    console.error(e); res.status(500).json({ error: "server error" });
+    if (String(e).includes("UNIQUE"))
+      return res.status(409).json({ error: "name already taken" });
+    console.error(e);
+    res.status(500).json({ error: "server error" });
   }
 });
 
-app.post("/api/login", async (req, res) => {
+// ログイン
+app.post("/api/login", (req, res) => {
   const name = String(req.body?.name || "").trim();
   const pin = String(req.body?.pin || "").trim();
-  const { rows } = await pool.query("SELECT * FROM users WHERE lower(name)=lower($1)", [name]);
-  const user = rows[0];
+  const user = db.prepare("SELECT * FROM users WHERE lower(name)=lower(?)").get(name);
   if (!user) return res.status(404).json({ error: "user not found" });
-  if (!bcrypt.compareSync(pin, user.pin_hash)) return res.status(401).json({ error: "invalid pin" });
+  if (!bcrypt.compareSync(pin, user.pin_hash))
+    return res.status(401).json({ error: "invalid pin" });
   res.json({ token: issueToken(user), user: { id: user.id, name: user.name } });
 });
 
-app.get("/api/me", auth, (req, res) => res.json({ id: req.user.uid, name: req.user.name }));
+// 自分
+app.get("/api/me", auth, (req, res) => {
+  res.json({ id: req.user.uid, name: req.user.name });
+});
 
-// 当日登録/更新（JST当日中のみ）
-app.post("/api/coins", auth, async (req, res) => {
+// コイン登録/更新（当日JST）
+app.post("/api/coins", auth, (req, res) => {
   const coins = Number(req.body?.coins);
-  if (!Number.isInteger(coins) || coins < 0) return res.status(400).json({ error: "coins must be non-negative integer" });
+  if (!Number.isInteger(coins) || coins < 0)
+    return res.status(400).json({ error: "coins must be non-negative integer" });
+  const date_ymd = (req.body?.date || jstDateYMD()).slice(0, 10);
 
-  const tz = req.header("X-Timezone") || DEFAULT_TZ;
-  if (!canEditToday(tz)) return res.status(403).json({ error: "today is finalized at 23:59" });
+  const existing = db
+    .prepare("SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?")
+    .get(req.user.uid, date_ymd);
 
-  const date_ymd = ymdInTZ(tz);
-  await pool.query(
-    `INSERT INTO coin_logs(user_id, date_ymd, coins, created_at)
-     VALUES ($1,$2,$3,$4)
-     ON CONFLICT (user_id, date_ymd)
-     DO UPDATE SET coins=EXCLUDED.coins, created_at=EXCLUDED.created_at`,
-    [req.user.uid, date_ymd, coins, nowISO()]
-  );
+  if (existing) {
+    db.prepare("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?").run(
+      coins,
+      nowISO(),
+      existing.id
+    );
+  } else {
+    db.prepare(
+      "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, ?)"
+    ).run(req.user.uid, date_ymd, coins, nowISO());
+  }
 
-  const { rows: prevRows } = await pool.query(
-    `SELECT coins FROM coin_logs WHERE user_id=$1 AND date_ymd < $2
-     ORDER BY date_ymd DESC LIMIT 1`, [req.user.uid, date_ymd]
-  );
-  const prev = prevRows[0]?.coins;
-  res.json({ date_ymd, coins, diff: prev == null ? 0 : (coins - prev) });
-});
-
-// 自分の履歴（直近N日）— 初回のdiffは0
-app.get("/api/coins", auth, async (req, res) => {
-  const days = Math.min(Number(req.query.days || 30), 365);
-  const tz = req.header("X-Timezone") || DEFAULT_TZ;
-  const today = ymdInTZ(tz);
-  const { rows } = await pool.query(
-    `
-    WITH series AS (
-      SELECT generate_series(($1::date - ($2 - 1) * INTERVAL '1 day')::date, $1::date, INTERVAL '1 day')::date AS d
-    ), base AS (
-      SELECT s.d AS date_ymd,
-             (SELECT coins FROM coin_logs WHERE user_id=$3 AND date_ymd=s.d) AS coins,
-             (SELECT coins FROM coin_logs WHERE user_id=$3 AND date_ymd < s.d ORDER BY date_ymd DESC LIMIT 1) AS prev
-      FROM series s
+  const prev = db
+    .prepare(
+      "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1"
     )
-    SELECT to_char(date_ymd,'YYYY-MM-DD') AS date_ymd,
-           COALESCE(coins, 0) AS coins,
-           CASE WHEN prev IS NULL THEN 0 ELSE (COALESCE(coins, prev) - prev) END AS diff
-    FROM base
-    ORDER BY date_ymd DESC
-    `,
-    [today, days, req.user.uid]
-  );
-  res.json(rows);
+    .get(req.user.uid, date_ymd);
+
+  res.json({ date_ymd, coins, diff: prev ? coins - prev.coins : 0 });
 });
 
-// ランキング（raw/daily/period）
-app.get("/api/board", async (req, res) => {
-  const tz = req.header("X-Timezone") || DEFAULT_TZ;
-  const finalized = lastFinalizedDate(tz);
-  const date = (req.query.date || finalized).slice(0, 10);
-  const mode = String(req.query.mode || "daily");
-  const periodDays = Math.min(Math.max(Number(req.query.periodDays || 7), 2), 365);
+// 自分の履歴（最新→過去）
+app.get("/api/coins", auth, (req, res) => {
+  const days = Math.min(Number(req.query.days || 30), 365);
+  const rows = db
+    .prepare(
+      "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?"
+    )
+    .all(req.user.uid, days);
 
-  // 期間開始日
-  const d = new Date(`${date}T00:00:00`);
-  d.setDate(d.getDate() - (periodDays - 1));
-  const start = d.toISOString().slice(0, 10);
-
-  let rows = [];
-  if (mode === "raw") {
-    const r = await pool.query(
-      `
-      WITH u AS (SELECT id, name FROM users)
-      SELECT u.name,
-             COALESCE((
-               SELECT coins FROM coin_logs
-               WHERE user_id=u.id
-               ORDER BY date_ymd DESC
-               LIMIT 1
-             ), 0) AS value
-      FROM u
-      ORDER BY value DESC, name ASC
-      `
-    );
-    rows = r.rows;
-  } else if (mode === "daily") {
-    const r = await pool.query(
-      `
-      WITH u AS (SELECT id, name FROM users)
-      SELECT u.name,
-        CASE
-          WHEN (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < $1 ORDER BY date_ymd DESC LIMIT 1) IS NULL
-            THEN 0
-          ELSE
-            (
-              COALESCE(
-                (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd=$1),
-                (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < $1 ORDER BY date_ymd DESC LIMIT 1)
-              )
-              -
-              (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < $1 ORDER BY date_ymd DESC LIMIT 1)
-            )
-        END AS value
-      FROM u
-      ORDER BY value DESC, name ASC
-      `,
-      [date]
-    );
-    rows = r.rows;
-  } else {
-    const r = await pool.query(
-      `
-      WITH u AS (SELECT id, name FROM users),
-      series AS (
-        SELECT generate_series($1::date, $2::date, '1 day')::date AS d
-      ),
-      diffs AS (
-        SELECT
-          u.name,
-          CASE
-            WHEN p.prev IS NULL THEN 0
-            ELSE (COALESCE(c.cur, p.prev) - p.prev)
-          END AS diff
-        FROM u
-        CROSS JOIN series s
-        LEFT JOIN LATERAL (
-          SELECT coins AS prev FROM coin_logs
-          WHERE user_id=u.id AND date_ymd < s.d
-          ORDER BY date_ymd DESC LIMIT 1
-        ) p ON TRUE
-        LEFT JOIN LATERAL (
-          SELECT coins AS cur FROM coin_logs
-          WHERE user_id=u.id AND date_ymd <= s.d
-          ORDER BY date_ymd DESC LIMIT 1
-        ) c ON TRUE
-      )
-      SELECT name, COALESCE(SUM(diff), 0) AS value
-      FROM diffs
-      GROUP BY name
-      ORDER BY value DESC, name ASC
-      `,
-      [start, date]
-    );
-    rows = r.rows;
-  }
-
-  const board = rows.map((r) => ({ name: r.name, value: Number(r.value) || 0 }));
-  res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=86400");
-  res.json({ date_ymd: date, mode, periodDays, board, finalized_date: finalized });
+  const withDiff = rows.map((r, i) => ({
+    ...r,
+    diff: i === rows.length - 1 ? 0 : r.coins - rows[i + 1].coins,
+  }));
+  res.json(withDiff);
 });
 
-// 折れ線グラフ用シリーズ（トップNの時系列）
-app.get("/api/board_series", async (req, res) => {
-  const tz = req.header("X-Timezone") || DEFAULT_TZ;
-  const finalized = lastFinalizedDate(tz);
-  const date = (req.query.date || finalized).slice(0, 10);
-  const mode = String(req.query.mode || "daily");             // raw/daily/period
-  const periodDays = Math.min(Math.max(Number(req.query.periodDays || 7), 2), 365);
-  const days = Math.min(Math.max(Number(req.query.days || (mode==="raw"||mode==="daily"?14:Math.max(14, periodDays+6))), 2), 365);
-  const top = Math.min(Math.max(Number(req.query.top || 5), 1), 50);
+// ================== ランキング（数値） ==================
+/*
+  GET /api/board?date=YYYY-MM-DD&mode=raw|daily|period&periodDays=7
+  - raw: 指定日までの最新記録値（コイン数）
+  - daily: 指定日の前日比
+  - period: 期間増減（指定日までと、起点日前日の差分）
+*/
+app.get("/api/board", (req, res) => {
+  const date = (req.query.date || jstDateYMD()).slice(0, 10);
+  const mode = String(req.query.mode || "daily").toLowerCase(); // raw|daily|period
+  const periodDays = Math.max(1, Number(req.query.periodDays || 7));
+  const startDate = addDays(date, -(periodDays - 1));
 
-  // グラフの開始日（可変）
-  const end = new Date(`${date}T00:00:00`);
-  const startD = new Date(end); startD.setDate(end.getDate() - (days - 1));
-  const start = startD.toISOString().slice(0, 10);
+  const users = db.prepare("SELECT id, name FROM users").all();
 
-  // まず「現行boardの順位」でトップNユーザーを確定
-  let topUsersQuery = "";
-  let topUsersParams = [];
-  if (mode === "raw") {
-    topUsersQuery = `
-      WITH last AS (
-        SELECT u.id, u.name,
-               (SELECT coins FROM coin_logs WHERE user_id=u.id ORDER BY date_ymd DESC LIMIT 1) AS v
-        FROM users u
-      )
-      SELECT id, name FROM last ORDER BY v DESC NULLS LAST, name ASC LIMIT $1
-    `;
-    topUsersParams = [top];
-  } else if (mode === "daily") {
-    topUsersQuery = `
-      WITH u AS (SELECT id, name FROM users),
-      diff AS (
-        SELECT u.id, u.name,
-          CASE
-            WHEN (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < $1 ORDER BY date_ymd DESC LIMIT 1) IS NULL
-              THEN 0
-            ELSE (
-              COALESCE(
-                (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd=$1),
-                (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < $1 ORDER BY date_ymd DESC LIMIT 1)
-              )
-              -
-              (SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd < $1 ORDER BY date_ymd DESC LIMIT 1)
-            )
-          END AS v
-        FROM u
-      )
-      SELECT id, name FROM diff ORDER BY v DESC, name ASC LIMIT $2
-    `;
-    topUsersParams = [date, top];
-  } else {
-    topUsersQuery = `
-      WITH u AS (SELECT id, name FROM users),
-      series AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS d),
-      diffs AS (
-        SELECT u.id, u.name,
-          CASE WHEN p.prev IS NULL THEN 0 ELSE (COALESCE(c.cur, p.prev) - p.prev) END AS diff
-        FROM u
-        CROSS JOIN series s
-        LEFT JOIN LATERAL (
-          SELECT coins AS prev FROM coin_logs WHERE user_id=u.id AND date_ymd < s.d ORDER BY date_ymd DESC LIMIT 1
-        ) p ON TRUE
-        LEFT JOIN LATERAL (
-          SELECT coins AS cur FROM coin_logs WHERE user_id=u.id AND date_ymd <= s.d ORDER BY date_ymd DESC LIMIT 1
-        ) c ON TRUE
-      ),
-      agg AS (
-        SELECT id, name,
-               SUM(diff) FILTER (WHERE d BETWEEN $1 AND $2) AS v
-        FROM diffs
-        GROUP BY id, name
-      )
-      SELECT id, name FROM agg ORDER BY v DESC, name ASC LIMIT $3
-    `;
-    topUsersParams = [start, date, top];
-  }
-  const topUsers = (await pool.query(topUsersQuery, topUsersParams)).rows;
-  if (topUsers.length === 0) return res.json({ date_ymd: date, mode, periodDays, days, top, series: [] });
+  const board = users
+    .map((u) => {
+      const lastOnOrBefore = db
+        .prepare(
+          "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd DESC LIMIT 1"
+        )
+        .get(u.id, date);
+      const prevBeforeDate = db
+        .prepare(
+          "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1"
+        )
+        .get(u.id, date);
+      const beforeWindow = db
+        .prepare(
+          "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1"
+        )
+        .get(u.id, startDate);
 
-  // 時系列を生成
-  const ids = topUsers.map(u => u.id);
-  const idList = ids.map((_, i) => `$${i+1}`).join(","); // $1,$2,...
-  const paramsBase = [...ids, start, date, periodDays];
+      const vLast = lastOnOrBefore?.coins || 0;
+      const vPrev = prevBeforeDate?.coins || 0;
+      const vBase = beforeWindow?.coins || 0;
 
-  let sql = "";
-  if (mode === "raw") {
-    sql = `
-      WITH topu AS (
-        SELECT id, name FROM users WHERE id IN (${idList})
-      ),
-      series AS (SELECT generate_series($${ids.length+1}::date, $${ids.length+2}::date, '1 day')::date AS d),
-      cur AS (
-        SELECT tu.id, tu.name, s.d,
-               (SELECT coins FROM coin_logs WHERE user_id=tu.id AND date_ymd <= s.d ORDER BY date_ymd DESC LIMIT 1) AS v
-        FROM topu tu CROSS JOIN series s
-      )
-      SELECT name, to_char(d,'YYYY-MM-DD') AS date_ymd, COALESCE(v,0) AS value
-      FROM cur
-      ORDER BY name, date_ymd
-    `;
-  } else if (mode === "daily") {
-    sql = `
-      WITH topu AS (
-        SELECT id, name FROM users WHERE id IN (${idList})
-      ),
-      series AS (SELECT generate_series($${ids.length+1}::date, $${ids.length+2}::date, '1 day')::date AS d),
-      base AS (
-        SELECT tu.id, tu.name, s.d,
-          (SELECT coins FROM coin_logs WHERE user_id=tu.id AND date_ymd < s.d ORDER BY date_ymd DESC LIMIT 1) AS prev,
-          (SELECT coins FROM coin_logs WHERE user_id=tu.id AND date_ymd <= s.d ORDER BY date_ymd DESC LIMIT 1) AS cur
-        FROM topu tu CROSS JOIN series s
-      )
-      SELECT name, to_char(d,'YYYY-MM-DD') AS date_ymd,
-             CASE WHEN prev IS NULL THEN 0 ELSE (COALESCE(cur,prev) - prev) END AS value
-      FROM base
-      ORDER BY name, date_ymd
-    `;
-  } else {
-    sql = `
-      WITH topu AS (
-        SELECT id, name FROM users WHERE id IN (${idList})
-      ),
-      series AS (SELECT generate_series($${ids.length+1}::date, $${ids.length+2}::date, '1 day')::date AS d),
-      base AS (
-        SELECT tu.id, tu.name, s.d,
-          (SELECT coins FROM coin_logs WHERE user_id=tu.id AND date_ymd < s.d ORDER BY date_ymd DESC LIMIT 1) AS prev,
-          (SELECT coins FROM coin_logs WHERE user_id=tu.id AND date_ymd <= s.d ORDER BY date_ymd DESC LIMIT 1) AS cur
-        FROM topu tu CROSS JOIN series s
-      ),
-      diffs AS (
-        SELECT id, name, d,
-               CASE WHEN prev IS NULL THEN 0 ELSE (COALESCE(cur,prev) - prev) END AS diff
-        FROM base
-      ),
-      roll AS (
-        SELECT name, d,
-               SUM(diff) OVER (PARTITION BY name ORDER BY d ROWS BETWEEN $${ids.length+3} PRECEDING AND CURRENT ROW) AS value
-        FROM diffs
-      )
-      SELECT name, to_char(d,'YYYY-MM-DD') AS date_ymd, value
-      FROM roll
-      ORDER BY name, date_ymd
-    `;
-  }
-  const rows = (await pool.query(sql, paramsBase)).rows;
+      let value = 0;
+      if (mode === "raw") value = vLast;
+      else if (mode === "daily") value = vLast - vPrev;
+      else value = vLast - vBase; // period = 期間増減（±そのまま）
 
-  // まとめて返す
-  const byName = {};
-  for (const r of rows) {
-    if (!byName[r.name]) byName[r.name] = [];
-    byName[r.name].push({ date_ymd: r.date_ymd, value: Number(r.value) || 0 });
-  }
-  const series = topUsers.map(u => ({ name: u.name, points: byName[u.name] || [] }));
-  res.json({ date_ymd: date, mode, periodDays, days, top, series });
+      return { name: u.name, value };
+    })
+    .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
+
+  res.json({ date_ymd: date, mode, periodDays, board });
 });
 
-// エラー
-app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(500).json({ error: "server error" });
+// ================== ランキング（折れ線グラフ用データ） ==================
+/*
+  GET /api/board_series?mode=daily&periodDays=7&days=14&top=5&date=YYYY-MM-DD
+  返却: { date_ymd, mode, periodDays, days, top, series: [{name, points:[{date_ymd, value}]}] }
+*/
+app.get("/api/board_series", (req, res) => {
+  try {
+    const mode = (req.query.mode || "daily").toLowerCase(); // raw|daily|period
+    const periodDays = Math.max(1, Number(req.query.periodDays || 7));
+    const days = Math.max(1, Math.min(90, Number(req.query.days || 14)));
+    const top = Math.max(1, Math.min(50, Number(req.query.top || 5)));
+    const endYmd = (req.query.date || lastFinalizedYmd()).slice(0, 10);
+    const startYmd = addDays(endYmd, -(days - 1));
+    const dates = listDates(startYmd, endYmd);
+
+    const users = db.prepare("SELECT id, name FROM users ORDER BY id").all();
+
+    const seriesAll = users.map((u) => {
+      const logs = db
+        .prepare(
+          "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd ASC"
+        )
+        .all(u.id, endYmd);
+
+      // その日までの最新値（キャリー）
+      let idx = 0,
+        last = 0;
+      const valuesRaw = dates.map((d) => {
+        while (idx < logs.length && logs[idx].date_ymd <= d) {
+          last = logs[idx].coins;
+          idx++;
+        }
+        return last;
+      });
+
+      // 前日差
+      const valuesDaily = valuesRaw.map((v, i) => (i === 0 ? 0 : v - valuesRaw[i - 1]));
+
+      // ローリング期間合計（±合算）
+      const valuesPeriod = valuesRaw.map((_, i) => {
+        let sum = 0;
+        const from = Math.max(0, i - (periodDays - 1));
+        for (let j = from; j <= i; j++) sum += j === 0 ? 0 : valuesRaw[j] - valuesRaw[j - 1];
+        return sum;
+      });
+
+      const pick = (m) => (m === "raw" ? valuesRaw : m === "daily" ? valuesDaily : valuesPeriod);
+      const picked = pick(mode);
+
+      return {
+        name: u.name,
+        points: dates.map((d, i) => ({ date_ymd: d, value: picked[i] || 0 })),
+        score: picked[picked.length - 1] || 0,
+      };
+    });
+
+    const topSeries = seriesAll
+      .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
+      .slice(0, top)
+      .map(({ name, points }) => ({ name, points }));
+
+    res.json({ date_ymd: endYmd, mode, periodDays, days: dates.length, top, series: topSeries });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
 });
 
-// 起動
-migrate()
-  .then(() => app.listen(PORT, () => console.log(`TSUMU COINS API on http://localhost:${PORT}`)))
-  .catch((e) => { console.error("Migration failed:", e); process.exit(1); });
+app.listen(PORT, () => console.log(`API server listening on :${PORT}`));
