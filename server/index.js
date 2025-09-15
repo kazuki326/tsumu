@@ -323,19 +323,21 @@ app.get("/api/coins", auth, async (req, res) => {
   res.json(withDiff);
 });
 
+
 /* ============= ランキング（数値）：/api/board =============
    クエリ:
-     date=YYYY-MM-DD（省略時は today）
+     date=YYYY-MM-DD（省略時は JST 今日）
      mode=raw|daily|period（既定: daily）
      periodDays=7（mode=period の窓幅）
    定義:
      raw    = 指定日までの最新値
      daily  = 指定日の前日比
-     period = 指定日までの値 − (窓開始の前日までの値) → 期間のネット増減
+     period = 期間内「記録日の前日比（diff）」の総和
+              └ 期間最初の記録の diff は「直前の記録（期間外でも可）」との差
 ============================================================= */
 app.get("/api/board", async (req, res) => {
   const date = (req.query.date || jstDateYMD()).slice(0, 10);
-  const mode = String(req.query.mode || "daily").toLowerCase();
+  const mode = String(req.query.mode || "daily").toLowerCase(); // raw|daily|period
   const periodDays = Math.max(1, Number(req.query.periodDays || 7));
   const startDate = addDays(date, -(periodDays - 1));
 
@@ -346,7 +348,9 @@ app.get("/api/board", async (req, res) => {
   try {
     const users = await sqlAll("SELECT id, name FROM users ORDER BY id", []);
     const board = [];
+
     for (const u of users) {
+      // 指定日までの最新値（raw/daily 用）
       const lastOnOrBefore = await sqlGet(
         "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd DESC LIMIT 1",
         [u.id, date]
@@ -355,22 +359,43 @@ app.get("/api/board", async (req, res) => {
         "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
         [u.id, date]
       );
-      const beforeWindow = await sqlGet(
-        "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
-        [u.id, startDate]
-      );
 
-      const vLast = lastOnOrBefore?.coins || 0;
-      const vPrev = prevBeforeDate?.coins || 0;
-      const vBase = beforeWindow?.coins || 0;
+      let value = 0;
 
-      const value =
-        mode === "raw" ? vLast : mode === "daily" ? vLast - vPrev : vLast - vBase;
+      if (mode === "raw") {
+        value = lastOnOrBefore?.coins || 0;
+      } else if (mode === "daily") {
+        const vLast = lastOnOrBefore?.coins || 0;
+        const vPrev = prevBeforeDate?.coins || 0;
+        value = vLast - vPrev;
+      } else {
+        // === period: 期間内“前日比(diff)”の総和 ===
+        // 1) 窓開始日前の直近記録（期間最初の diff 計算の基準）
+        const beforeStart = await sqlGet(
+          "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
+          [u.id, startDate]
+        );
+        // 2) 期間内の記録行（昇順）
+        const rows = await sqlAll(
+          "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd >= ? AND date_ymd <= ? ORDER BY date_ymd ASC",
+          [u.id, startDate, date]
+        );
+
+        // 3) 期間内の「記録日の前日比（＝直前の記録との差）」を合計
+        let last = beforeStart?.coins || 0;
+        let sum = 0;
+        for (const r of rows) {
+          const diff = (r.coins || 0) - last;
+          sum += diff;
+          last = r.coins || 0;
+        }
+        value = sum;
+      }
 
       board.push({ name: u.name, value });
     }
-    board.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
 
+    board.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
     const payload = { date_ymd: date, mode, periodDays, board };
     setCache(cacheKey, payload, 60_000); // 60秒キャッシュ
     res.json(payload);
@@ -379,6 +404,7 @@ app.get("/api/board", async (req, res) => {
     res.status(500).json({ error: "server error" });
   }
 });
+
 
 /* =========== ランキング（折れ線グラフ）：/api/board_series ===========
    クエリ:
