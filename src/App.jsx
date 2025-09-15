@@ -1,26 +1,24 @@
-// src/App.jsx — 自分の履歴：7日/30日の“日付ベース”増減を表示（キャリーして前日差を合算）
-// ・「自分の履歴 / 全体ランキング」タブあり
-// ・ランキングの「数字/グラフ」トグルは見出し右上（タブ配色）
-// ・グラフは白背景
+// src/App.jsx
+// 変更点：自分の履歴の「7日間増減」「30日間増減」は、表示中の“前日比(diff)”の総和で計算
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import "./App.css";
 
-/* ========= ルーティング（ハッシュ） ========= */
+/* ========== ルーティング（ハッシュ） ========== */
 const useHashRoute = () => {
-  const get = () => window.location.hash.replace("#", "") || "/";
-  const [route, setRoute] = useState(get);
+  const cur = () => window.location.hash.replace("#", "") || "/";
+  const [route, setRoute] = useState(cur);
   useEffect(() => {
-    const onHash = () => setRoute(get());
+    const onHash = () => setRoute(cur());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
-  const push = (path) => { window.location.hash = path; };
+  const push = (path) => (window.location.hash = path);
   return { route, push };
 };
 
-/* ========= 日付ユーティリティ ========= */
+/* ========== 日付ユーティリティ ========== */
 const toDate = (ymd) => {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d));
@@ -30,13 +28,8 @@ const addDays = (ymd, n) => {
   dt.setUTCDate(dt.getUTCDate() + n);
   return dt.toISOString().slice(0, 10);
 };
-const listDays = (endYmd, len) => {
-  const out = [];
-  for (let i = len - 1; i >= 0; i--) out.push(addDays(endYmd, -i));
-  return out;
-};
 
-/* ========= メイン ========= */
+/* ========== メイン ========== */
 export default function App() {
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -61,7 +54,7 @@ export default function App() {
   const [meTab, setMeTab] = useState("history"); // "history" | "leaderboard"
   const { route, push } = useHashRoute();
 
-  // 数字 or グラフ（維持）
+  // 数字orグラフ（ランキングの表示切替）
   const [boardView, setBoardView] = useState("list"); // "list" | "chart"
 
   const modeMap = {
@@ -71,6 +64,7 @@ export default function App() {
     "30d": { mode: "period", periodDays: 30 }
   };
 
+  /* ---- 初期読み込み ---- */
   const loadStatus = async () => {
     const st = await api.status();
     if (!st?.error) {
@@ -82,14 +76,14 @@ export default function App() {
 
   const loadMy = async () => {
     if (!loggedIn) { setMyHistory([]); return; }
-    // 日付ベース30日を安全に計算したいので多めに取得
+    // 充分な件数を確保（テーブルは14行、合計は7/30日で使う）
     const me = await api.myCoins(120);
     setMyHistory(Array.isArray(me) ? me : []);
   };
 
   const loadBoard = async () => {
     const opts = { ...modeMap[boardTab] };
-    if (todayYmd && canEdit) opts.date = todayYmd; // 日中は“今日(暫定)”
+    if (todayYmd && canEdit) opts.date = todayYmd; // 日中は今日（暫定）
     const b = await api.board(opts);
     setBoard(Array.isArray(b?.board) ? b.board : []);
     if (b?.date_ymd) setBoardDate(b.date_ymd);
@@ -101,6 +95,7 @@ export default function App() {
   useEffect(() => { loadMy(); }, [loggedIn]);
   useEffect(() => { loadBoard(); }, [boardTab, loggedIn, todayYmd, canEdit]);
 
+  /* ---- 認証 ---- */
   const doLogin = async () => {
     if (!name.trim() || pin.trim().length < 4) return alert("名前と4桁以上のPINを入力してね");
     setBusy(true);
@@ -148,6 +143,7 @@ export default function App() {
   };
   const onCoinsKeyDown = (e) => { if (e.key === "Enter" && !busy) submitCoins(); };
 
+  // ルーティング遷移
   useEffect(() => {
     if (!loggedIn && route === "/me") push("/");
     if (loggedIn && (route === "/" || route === "/signup")) push("/me");
@@ -221,7 +217,12 @@ export default function App() {
               <button className={`tab ${meTab==="leaderboard"?"active":""}`} onClick={()=>setMeTab("leaderboard")}>全体ランキング</button>
             </div>
 
-            {meTab === "history" && <MyHistoryTable rows={myHistory} endYmd={todayYmd || myHistory[0]?.date_ymd} />}
+            {meTab === "history" && (
+              <MyHistoryTable
+                rows={myHistory}
+                endYmd={todayYmd || myHistory[0]?.date_ymd}
+              />
+            )}
 
             {meTab === "leaderboard" && (
               <LeaderboardCard
@@ -244,7 +245,7 @@ export default function App() {
   );
 }
 
-/* ========= パーツ ========= */
+/* ========== パーツ ========== */
 
 function SignupCard({ busy, onSubmit, onBack }) {
   const [n, setN] = useState("");
@@ -262,47 +263,25 @@ function SignupCard({ busy, onSubmit, onBack }) {
   );
 }
 
-/* ====== 自分の履歴（7日・30日を“日付ベース”で計算） ====== */
+/* ====== 自分の履歴（7日/30日 = “前日比の総和”） ====== */
 function MyHistoryTable({ rows, endYmd }) {
-  // rows: 最新→過去（/api/coins の仕様）
-  // endYmd: 集計の終端日（通常は今日）
+  // rows: 最新→過去。各要素 { date_ymd, coins, diff }（diff は前の“記録”との比較）
+  // endYmd: 集計終端日（通常は今日）
 
-  // map: date_ymd -> coins（その日の記録があるものだけ）
-  const byDate = new Map(rows.map(r => [r.date_ymd, Number(r.coins) || 0]));
+  const end = endYmd || rows[0]?.date_ymd || "";
 
-  // endYmd が未取得時のフォールバック
-  const end = endYmd || rows[0]?.date_ymd;
-  const latestCoins = Number(byDate.get(end) ?? rows[0]?.coins ?? 0);
-
-  // 直近 N 日の「キャリー後の前日差」を作る
-  const makeWindowSum = (N) => {
+  // 直近 N「日」の範囲に入る行の diff を合計する（= 表示している“前日比”の総和）
+  const sumDiffsWindow = (N) => {
     if (!end) return 0;
-
-    // ウィンドウ [start..end]（N日）
-    const days = listDays(end, N);
-    const start = days[0];
-    const dayBeforeStart = addDays(start, -1);
-
-    // start の前日までの最新値（ベースライン）
-    let base = 0;
-    for (const r of rows) {
-      if (r.date_ymd <= dayBeforeStart) { base = Number(r.coins) || 0; break; }
-    }
-
-    // キャリーして各日の値と前日差を算出
-    let last = base;
-    let sum = 0;
-    for (const d of days) {
-      const cur = byDate.has(d) ? byDate.get(d) : last;
-      const diff = cur - last;
-      sum += diff;          // 減少もそのまま合算（ネット増減）
-      last = cur;
-    }
-    return sum;
+    const start = addDays(end, -(N - 1));
+    return rows
+      .filter(r => r.date_ymd >= start && r.date_ymd <= end)
+      .reduce((acc, r) => acc + Number(r.diff || 0), 0);
   };
 
-  const sum7 = makeWindowSum(7);
-  const sum30 = makeWindowSum(30);
+  const latestCoins = Number(rows[0]?.coins ?? 0);
+  const sum7  = sumDiffsWindow(7);
+  const sum30 = sumDiffsWindow(30);
 
   const Diff = ({ value }) => {
     const v = Number(value) || 0;
@@ -312,7 +291,7 @@ function MyHistoryTable({ rows, endYmd }) {
 
   return (
     <>
-      {/* サマリー：最新/7日/30日（右寄せ） */}
+      {/* サマリー */}
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>自分の履歴（直近14日）</h3>
         <div className="row" style={{ gap: 12 }}>
@@ -331,7 +310,7 @@ function MyHistoryTable({ rows, endYmd }) {
         </div>
       </div>
 
-      {/* 表示は従来どおり直近14行（最新→過去） */}
+      {/* テーブル：最新→過去、14行表示 */}
       <table>
         <thead><tr><th>日付</th><th>コイン</th><th>前日比</th></tr></thead>
         <tbody>
@@ -358,7 +337,6 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // タブ→グラフAPIパラメータ
   const toSeriesParams = () => {
     if (boardTab === "raw")   return { mode: "raw",   days: 14, top: 5, date: boardDate };
     if (boardTab === "daily") return { mode: "daily", days: 14, top: 5, date: boardDate };
@@ -366,7 +344,6 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
     return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate };
   };
 
-  // view がグラフのときだけ fetch
   useEffect(() => {
     if (view !== "chart") return;
     let cancelled = false;
@@ -384,7 +361,7 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
 
   return (
     <div className="rank-box">
-      {/* 見出し行：右上に「数字/グラフ」トグル（既存タブ配色） */}
+      {/* 見出し + 右上トグル */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>
           ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
@@ -403,7 +380,6 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
         <button className={`tab ${boardTab==="30d"?"active":""}`}   onClick={()=>setBoardTab("30d")}>30日間増減</button>
       </div>
 
-      {/* 数字 or グラフ */}
       {view === "list" ? (
         <RankListAndBars data={board} unit={labelForTab(boardTab)} />
       ) : (
@@ -430,7 +406,7 @@ function labelForTab(tab) {
   return "枚";
 }
 
-// リスト＋棒（負値は赤）
+/* リスト＋バー表示 */
 function RankListAndBars({ data, unit }) {
   const maxAbs = Math.max(1, ...data.map(d => Math.abs(Number(d.value) || 0)));
   return (
@@ -458,7 +434,7 @@ function RankListAndBars({ data, unit }) {
   );
 }
 
-/* ====== 折れ線グラフ（白背景版） ====== */
+/* ====== 折れ線グラフ（白背景） ====== */
 function LineChart({ series, unit }) {
   const dates = (series[0]?.points || []).map(p => p.date_ymd);
   const allVals = series.flatMap(s => s.points.map(p => p.value));
@@ -472,10 +448,10 @@ function LineChart({ series, unit }) {
     return H - pad - t * chartH;
   };
 
-  const axisColor = "#cbd5e1";         // ライトグレー（枠線・軸）
-  const gridColor = "rgba(0,0,0,.06)"; // 薄いグリッド
-  const tickColor = "#475569";         // 目盛り文字
-  const zeroColor = "#ef4444";         // 0ライン（赤）
+  const axisColor = "#cbd5e1";
+  const gridColor = "rgba(0,0,0,.06)";
+  const tickColor = "#475569";
+  const zeroColor = "#ef4444";
 
   const axisY0 = y(0);
   const color = (i) => `hsl(${(i*67)%360} 70% 45%)`;
