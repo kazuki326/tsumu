@@ -1,5 +1,5 @@
-// src/App.jsx — ランキング：リスト ↔ 折れ線グラフ 切り替え
-// raw=最新記録の推移、daily=前日比の推移、period=7/30日のローリング増減推移
+// src/App.jsx — 「履歴/ランキング」復活 & 数字/グラフトグルを見出し右上に固定
+// 既存CSS (.tabs / .tab / .tab.active など) はそのまま使います。
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
@@ -38,8 +38,13 @@ export default function App() {
   const [isProvisional, setIsProvisional] = useState(false);
   const [staleBoard, setStaleBoard] = useState(false);
 
-  const [meTab, setMeTab] = useState("history");
+  // マイページ内のタブ（復活）
+  const [meTab, setMeTab] = useState("history"); // "history" | "leaderboard"
+
   const { route, push } = useHashRoute();
+
+  // 数字 or グラフ（維持）
+  const [boardView, setBoardView] = useState("list"); // "list" | "chart"
 
   const modeMap = {
     raw: { mode: "raw" },
@@ -145,7 +150,7 @@ export default function App() {
               <button disabled={busy} onClick={doLogin}>ログイン</button>
             </div>
             <div className="subrow">
-              <button className="link" onClick={()=>push("/signup")}>新規登録はこちら</button>
+              <button className="link" onClick={()=>window.location.hash="/signup"}>新規登録はこちら</button>
             </div>
           </div>
 
@@ -156,12 +161,14 @@ export default function App() {
             boardDate={boardDate}
             isProvisional={isProvisional}
             stale={staleBoard}
+            view={boardView}
+            setView={setBoardView}
           />
         </>
       )}
 
       {route === "/signup" && (
-        <SignupCard busy={busy} onSubmit={doSignup} onBack={()=>push("/")} />
+        <SignupCard busy={busy} onSubmit={doSignup} onBack={()=>window.location.hash="/"} />
       )}
 
       {route === "/me" && loggedIn && (
@@ -188,6 +195,7 @@ export default function App() {
             </div>
           </div>
 
+          {/* ←← ここが復活した部分：マイページ内に履歴/ランキングのタブカード */}
           <div className="card">
             <div className="tabs secondary">
               <button className={`tab ${meTab==="history"?"active":""}`} onClick={()=>setMeTab("history")}>自分の履歴</button>
@@ -204,6 +212,8 @@ export default function App() {
                 boardDate={boardDate}
                 isProvisional={isProvisional}
                 stale={staleBoard}
+                view={boardView}
+                setView={setBoardView}
               />
             )}
           </div>
@@ -256,48 +266,48 @@ function MyHistoryTable({ rows }) {
   );
 }
 
-function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisional, stale }) {
-  const [view, setView] = useState("list"); // "list" | "chart"
+function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisional, stale, view, setView }) {
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(false);
 
+  // タブ→APIパラメータ
   const toSeriesParams = () => {
-    if (boardTab === "raw") return { mode: "raw", days: 14, top: 5, date: boardDate };
+    if (boardTab === "raw")   return { mode: "raw",   days: 14, top: 5, date: boardDate };
     if (boardTab === "daily") return { mode: "daily", days: 14, top: 5, date: boardDate };
-    if (boardTab === "7d") return { mode: "period", periodDays: 7, days: 28, top: 5, date: boardDate };
+    if (boardTab === "7d")    return { mode: "period", periodDays: 7,  days: 28, top: 5, date: boardDate };
     return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate }; // "30d"
   };
 
+  // view を維持。view が "chart" のときだけ系列を取得
   useEffect(() => {
-    // タブが変わったらリストに戻す＆古い系列を破棄
-    setView("list");
-    setSeries([]);
-  }, [boardTab]);
-
-  useEffect(() => {
-    // グラフ表示に切り替えたら取得
     if (view !== "chart") return;
+    let cancelled = false;
     (async () => {
       setLoading(true);
       try {
         const s = await api.boardSeries(toSeriesParams());
-        setSeries(Array.isArray(s?.series) ? s.series : []);
-      } finally { setLoading(false); }
+        if (!cancelled) setSeries(Array.isArray(s?.series) ? s.series : []);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
+    return () => { cancelled = true; };
   }, [view, boardTab, boardDate]);
 
   return (
     <div className="rank-box">
-      <div className="rank-header">
-        <h3>
+      {/* 見出し行：右上に数字/グラフのタブを固定（CSS変更なし、インラインでflex） */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <h3 style={{ margin: 0 }}>
           ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
         </h3>
-        <div className="view-toggle">
-          <button className={`chip ${view==="list"?"active":""}`} onClick={()=>setView("list")}>数字</button>
-          <button className={`chip ${view==="chart"?"active":""}`} onClick={()=>setView("chart")}>グラフ</button>
+        <div className="tabs" style={{ margin: 0, flexWrap: "nowrap" }}>
+          <button className={`tab ${view === "list" ? "active" : ""}`}  onClick={()=>setView("list")}>数字</button>
+          <button className={`tab ${view === "chart" ? "active" : ""}`} onClick={()=>setView("chart")}>グラフ</button>
         </div>
       </div>
 
+      {/* 指標タブ（下の薄青/濃青ボタン） */}
       <div className="tabs">
         <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数（最新記録）</button>
         <button className={`tab ${boardTab==="daily"?"active":""}`} onClick={()=>setBoardTab("daily")}>前日比</button>
@@ -305,10 +315,11 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
         <button className={`tab ${boardTab==="30d"?"active":""}`}   onClick={()=>setBoardTab("30d")}>30日間増減</button>
       </div>
 
+      {/* 数字 or グラフ */}
       {view === "list" ? (
         <RankListAndBars data={board} unit={labelForTab(boardTab)} />
       ) : (
-        <div className="chart-box">
+        <div style={{ marginTop: 8 }}>
           {loading ? <p className="muted">グラフを読み込み中…</p> :
            series.length===0 ? <p className="muted">グラフ用のデータがありません</p> :
            <LineChart series={series} unit={labelForTab(boardTab)} />}
@@ -331,7 +342,7 @@ function labelForTab(tab) {
   return "枚";
 }
 
-// リスト+棒（負値は赤）
+// リスト＋棒（負値は赤）
 function RankListAndBars({ data, unit }) {
   const maxAbs = Math.max(1, ...data.map(d => Math.abs(Number(d.value) || 0)));
   return (
@@ -348,7 +359,7 @@ function RankListAndBars({ data, unit }) {
                 {val.toLocaleString()} {unit}
               </b>
               <div className="bar">
-                <div className="bar-fill" style={{ width: `${width}%`, background: isPos ? undefined : "var(--ng)" }} />
+                <div className="bar-fill" style={{ width: `${width}%`, background: isPos ? undefined : "#ef4444" }} />
               </div>
             </li>
           );
@@ -359,10 +370,8 @@ function RankListAndBars({ data, unit }) {
   );
 }
 
-/* ─────────── SVG 折れ線グラフ ─────────── */
-
+/* ─────────── LineChart（白背景版） ─────────── */
 function LineChart({ series, unit }) {
-  // series: [{name, points:[{date_ymd, value}, ...]}]
   const dates = (series[0]?.points || []).map(p => p.date_ymd);
   const allVals = series.flatMap(s => s.points.map(p => p.value));
   const minV = Math.min(0, ...allVals);
@@ -375,17 +384,34 @@ function LineChart({ series, unit }) {
     return H - pad - t * chartH;
   };
 
+  // 白背景に合わせた色
+  const axisColor = "#cbd5e1";              // ライトグレー（枠線・軸）
+  const gridColor = "rgba(0,0,0,.06)";      // 薄いグリッド
+  const tickColor = "#475569";              // 目盛り文字（slate-600）
+  const zeroColor = "#ef4444";              // 0ライン（赤）
+
   const axisY0 = y(0);
-  const colors = (i) => `hsl(${(i*67)%360} 70% 45%)`; // 適当な色相ズラし
+  const color = (i) => `hsl(${(i*67)%360} 70% 45%)`;
 
   return (
-    <div className="chart-area">
-      <svg viewBox={`0 0 ${W} ${H}`} className="chart-svg" role="img" aria-label="line chart">
+    <div style={{ width: "100%", overflowX: "auto" }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{
+          width: "100%",
+          height: "auto",
+          background: "#fff",                // ← 背景白
+          border: "1px solid #e5e7eb",       // ライトグレーの枠
+          borderRadius: 10
+        }}
+      >
         {/* axes */}
-        <line x1={pad} y1={y(minV)} x2={pad} y2={y(maxV)} className="axis" />
-        <line x1={pad} y1={H-pad} x2={W-pad} y2={H-pad} className="axis" />
+        <line x1={pad} y1={y(minV)} x2={pad} y2={y(maxV)} stroke={axisColor} strokeWidth="1" />
+        <line x1={pad} y1={H-pad} x2={W-pad} y2={H-pad} stroke={axisColor} strokeWidth="1" />
         {/* zero line */}
-        {minV < 0 && maxV > 0 && <line x1={pad} y1={axisY0} x2={W-pad} y2={axisY0} className="zeroline" />}
+        {minV < 0 && maxV > 0 && (
+          <line x1={pad} y1={axisY0} x2={W-pad} y2={axisY0} stroke={zeroColor} strokeDasharray="4 4" strokeWidth="1" />
+        )}
 
         {/* y ticks */}
         {[0, 0.5, 1].map(t=>{
@@ -393,8 +419,10 @@ function LineChart({ series, unit }) {
           const py = y(v);
           return (
             <g key={t}>
-              <line x1={pad} y1={py} x2={W-pad} y2={py} className="grid" />
-              <text x={pad-6} y={py+4} textAnchor="end" className="tick">{Math.round(v).toLocaleString()}</text>
+              <line x1={pad} y1={py} x2={W-pad} y2={py} stroke={gridColor} strokeWidth="1" />
+              <text x={pad-6} y={py+4} textAnchor="end" fill={tickColor} fontSize="11">
+                {Math.round(v).toLocaleString()}
+              </text>
             </g>
           );
         })}
@@ -402,10 +430,12 @@ function LineChart({ series, unit }) {
         {/* x ticks */}
         {dates.map((d,i)=>(
           <g key={d}>
-            {i%Math.ceil(dates.length/6)===0 && (
+            {i%Math.ceil(dates.length/6||1)===0 && (
               <>
-                <line x1={x(i)} y1={H-pad} x2={x(i)} y2={H-pad+4} className="tickline" />
-                <text x={x(i)} y={H-pad+18} textAnchor="middle" className="tick">{d.slice(5)}</text>
+                <line x1={x(i)} y1={H-pad} x2={x(i)} y2={H-pad+4} stroke={axisColor} strokeWidth="1" />
+                <text x={x(i)} y={H-pad+18} textAnchor="middle" fill={tickColor} fontSize="11">
+                  {d.slice(5)}
+                </text>
               </>
             )}
           </g>
@@ -414,18 +444,18 @@ function LineChart({ series, unit }) {
         {/* lines */}
         {series.map((s,idx)=>{
           const d = s.points.map((p,i)=>`${i===0?"M":"L"}${x(i)},${y(p.value)}`).join(" ");
-          return <path key={s.name} d={d} fill="none" stroke={colors(idx)} strokeWidth="2" className="line"/>;
+          return <path key={s.name} d={d} fill="none" stroke={color(idx)} strokeWidth="2" />;
         })}
 
         {/* legend */}
         {series.map((s,idx)=>(
           <g key={`lg-${s.name}`} transform={`translate(${pad+8},${pad+16+idx*18})`}>
-            <rect width="12" height="2" y="7" fill={colors(idx)} />
-            <text x="18" y="10" className="legend">{s.name}</text>
+            <rect width="12" height="2" y="7" fill={color(idx)} />
+            <text x="18" y="10" fill="#334155" fontSize="12">{s.name}</text>
           </g>
         ))}
       </svg>
-      <div className="chart-caption">単位: {unit}</div>
+      <div className="muted" style={{ marginTop: 6 }}>単位: {unit}</div>
     </div>
   );
 }
