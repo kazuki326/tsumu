@@ -1,7 +1,10 @@
 // server/index.js — TSUMU COINS API (Postgres)
-// ・Render Postgres (DATABASE_URL) に保存
-// ・「前日比」…初回日は 0 に補正
-// ・ランキング…raw/daily/period(7日/30日 等)
+// ・Render Postgres (DATABASE_URL)
+// ・前日比：初回は 0 に補正
+// ・ランキング：
+//    - raw …「コイン数」= 各ユーザーの“最後の記録”（日付を問わない）
+//    - daily … 指定日の前日比（初回は 0）
+//    - period … 期間内の日々の前日差を合計（±の“増減”をそのまま合計）
 // ・JST 23:59 までは当日編集OK。日中はフロントから「今日(暫定)」でランキング取得
 // ・/api/board に軽いキャッシュヘッダ（public, max-age=60, stale-while-revalidate=86400）
 
@@ -24,7 +27,7 @@ app.use(helmet());
 const allowOrigin = (origin) => {
   if (!origin) return true;
   return (
-    origin === "https://kazuki326.github.io" || // GitHub Pages
+    origin === "https://kazuki326.github.io" ||
     origin === "http://localhost:5173" ||
     origin === "http://127.0.0.1:5173" ||
     origin?.includes("localhost")
@@ -237,7 +240,7 @@ app.get("/api/coins", auth, async (req, res) => {
 });
 
 // ランキング（date, mode, periodDays）
-// mode: raw=当日のコイン数 / daily=前日比(初回0) / period=期間合計
+// mode: raw=“最後の記録のコイン数” / daily=前日比(初回0) / period=期間“増減”合計(±)
 app.get("/api/board", async (req, res) => {
   const tz = req.header("X-Timezone") || DEFAULT_TZ;
   const finalized = lastFinalizedDate(tz);
@@ -252,18 +255,24 @@ app.get("/api/board", async (req, res) => {
 
   let rows = [];
   if (mode === "raw") {
+    // ★ 各ユーザーの“最後の記録”のコイン数を表示
     const r = await pool.query(
       `
       WITH u AS (SELECT id, name FROM users)
       SELECT u.name,
-             COALESCE((SELECT coins FROM coin_logs WHERE user_id=u.id AND date_ymd=$1), 0) AS value
+             COALESCE((
+               SELECT coins FROM coin_logs
+               WHERE user_id=u.id
+               ORDER BY date_ymd DESC
+               LIMIT 1
+             ), 0) AS value
       FROM u
       ORDER BY value DESC, name ASC
-      `,
-      [date]
+      `
     );
     rows = r.rows;
   } else if (mode === "daily") {
+    // 指定日の前日比（初回は 0）
     const r = await pool.query(
       `
       WITH u AS (SELECT id, name FROM users)
@@ -288,15 +297,38 @@ app.get("/api/board", async (req, res) => {
     );
     rows = r.rows;
   } else {
+    // ★ 期間の“増減合計”（±）。各日 d で (当日値または直前値) - 直前値 を足し合わせる
     const r = await pool.query(
       `
-      WITH u AS (SELECT id, name FROM users)
-      SELECT u.name,
-             COALESCE((
-               SELECT SUM(coins) FROM coin_logs
-               WHERE user_id=u.id AND date_ymd BETWEEN $1 AND $2
-             ), 0) AS value
-      FROM u
+      WITH u AS (SELECT id, name FROM users),
+      series AS (
+        SELECT generate_series($1::date, $2::date, '1 day')::date AS d
+      ),
+      diffs AS (
+        SELECT
+          u.name,
+          CASE
+            WHEN p.prev IS NULL THEN 0
+            ELSE (COALESCE(c.cur, p.prev) - p.prev)
+          END AS diff
+        FROM u
+        CROSS JOIN series s
+        LEFT JOIN LATERAL (
+          SELECT coins AS prev
+          FROM coin_logs
+          WHERE user_id=u.id AND date_ymd < s.d
+          ORDER BY date_ymd DESC LIMIT 1
+        ) p ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT coins AS cur
+          FROM coin_logs
+          WHERE user_id=u.id AND date_ymd <= s.d
+          ORDER BY date_ymd DESC LIMIT 1
+        ) c ON TRUE
+      )
+      SELECT name, COALESCE(SUM(diff), 0) AS value
+      FROM diffs
+      GROUP BY name
       ORDER BY value DESC, name ASC
       `,
       [start, date]
@@ -306,7 +338,7 @@ app.get("/api/board", async (req, res) => {
 
   const board = rows.map((r) => ({ name: r.name, value: Number(r.value) || 0 }));
 
-  // ★ 軽いキャッシュヘッダ（ブラウザ/CDNにヒント）
+  // 軽いキャッシュ指示
   res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=86400");
 
   res.json({ date_ymd: date, mode, periodDays, board, finalized_date: finalized });

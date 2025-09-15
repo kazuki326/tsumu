@@ -43,7 +43,7 @@ export const api = {
   postCoins:    (coins)       => req("/api/coins",    { method: "POST", body: JSON.stringify({ coins }) }),
   myCoins:      (days=30)     => req(`/api/coins?days=${days}`),
 
-  // ★ ランキングは“キャッシュ優先”：ネット(4s)→成功なら保存／失敗はキャッシュ
+  // ランキングは“キャッシュ優先”：ネット(4s)→成功なら保存／失敗はキャッシュ
   board: async (opts = {}) => {
     const params = new URLSearchParams();
     if (typeof opts === "string") {
@@ -56,13 +56,10 @@ export const api = {
     const q = params.toString();
     const url = `${BASE}/api/board${q ? `?${q}` : ""}`;
 
-    // 1) ネット（4秒だけ待つ）
     try {
       const res = await fetchWithTimeout(url, { headers: { "X-Timezone": tz } }, 4000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.clone().json();
-
-      // 2) 成功したらキャッシュ更新（対応ブラウザのみ）
       if ("caches" in window) {
         try {
           const cache = await caches.open(CACHE_NAME);
@@ -74,7 +71,6 @@ export const api = {
       }
       return { ...json, _fromCache: false };
     } catch {
-      // 3) ネットがダメ → キャッシュ返す
       if ("caches" in window) {
         try {
           const cache = await caches.open(CACHE_NAME);
@@ -85,7 +81,6 @@ export const api = {
           }
         } catch {}
       }
-      // 4) キャッシュも無ければ空リスト
       return { board: [], date_ymd: typeof opts === "string" ? opts : (opts?.date || ""), _fromCache: true, error: "offline" };
     }
   }

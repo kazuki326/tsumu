@@ -1,11 +1,9 @@
-// src/App.jsx — キャッシュ優先ランキング対応（「キャッシュ表示」バッジ）
-// 既存のUI（マイページ/履歴/ランキング/暫定表示/初回前日比0）もそのまま
+// src/App.jsx — 期間は“増減(±)合計”、rawは“最後の記録”、棒グラフはマイナス対応
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import "./App.css";
 
-// 簡易ハッシュルーター
 const useHashRoute = () => {
   const get = () => window.location.hash.replace("#", "") || "/";
   const [route, setRoute] = useState(get);
@@ -19,30 +17,26 @@ const useHashRoute = () => {
 };
 
 export default function App() {
-  // 共通UI
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [coins, setCoins] = useState("");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState({ type: "", text: "" });
 
-  // 認証
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
   const loggedIn = useMemo(() => !!token, [token]);
 
-  // ステータス
   const [todayYmd, setTodayYmd] = useState("");
   const [canEdit, setCanEdit] = useState(true);
 
-  // 自分の履歴
   const [myHistory, setMyHistory] = useState([]);
 
-  // ランキング
   const [boardTab, setBoardTab] = useState("daily"); // "raw" | "daily" | "7d" | "30d"
   const [board, setBoard] = useState([]);
   const [boardDate, setBoardDate] = useState("");
-  const [isProvisional, setIsProvisional] = useState(false); // 今日(暫定)
-  const [staleBoard, setStaleBoard] = useState(false);       // キャッシュ表示中
+  const [isProvisional, setIsProvisional] = useState(false);
+  const [staleBoard, setStaleBoard] = useState(false);
+
   const modeMap = {
     raw: { mode: "raw" },
     daily: { mode: "daily" },
@@ -50,12 +44,9 @@ export default function App() {
     "30d": { mode: "period", periodDays: 30 },
   };
 
-  // マイページ内タブ
-  const [meTab, setMeTab] = useState("history"); // "history" | "leaderboard"
-
+  const [meTab, setMeTab] = useState("history");
   const { route, push } = useHashRoute();
 
-  // ===== ロード =====
   const loadStatus = async () => {
     const st = await api.status();
     if (!st?.error) {
@@ -71,22 +62,20 @@ export default function App() {
     setMyHistory(Array.isArray(me) ? me : []);
   };
 
-  // ★ 日中は「今日（暫定）」でランキング表示、締切後は確定日へ
   const loadBoard = async () => {
     const opts = { ...modeMap[boardTab] };
-    if (todayYmd && canEdit) opts.date = todayYmd; // 暫定表示
+    if (todayYmd && canEdit) opts.date = todayYmd; // 日中は“今日(暫定)”
     const b = await api.board(opts);
     setBoard(Array.isArray(b?.board) ? b.board : []);
     if (b?.date_ymd) setBoardDate(b.date_ymd);
     setIsProvisional(!!(todayYmd && canEdit && b?.date_ymd === todayYmd));
-    setStaleBoard(!!b?._fromCache); // キャッシュからの表示かどうか
+    setStaleBoard(!!b?._fromCache);
   };
 
   useEffect(() => { loadStatus(); }, []);
   useEffect(() => { loadMy(); }, [loggedIn]);
   useEffect(() => { loadBoard(); }, [boardTab, loggedIn, todayYmd, canEdit]);
 
-  // ===== 認証 =====
   const doLogin = async () => {
     if (!name.trim() || pin.trim().length < 4) return alert("名前と4桁以上のPINを入力してね");
     setBusy(true);
@@ -119,7 +108,6 @@ export default function App() {
     } finally { setBusy(false); }
   };
 
-  // ===== 入力 =====
   const submitCoins = async () => {
     const n = Number(coins);
     if (!Number.isInteger(n) || n < 0) return alert("0以上の整数で入力してね");
@@ -135,7 +123,6 @@ export default function App() {
   };
   const onCoinsKeyDown = (e) => { if (e.key === "Enter" && !busy) submitCoins(); };
 
-  // ルーティング整合
   useEffect(() => {
     if (!loggedIn && route === "/me") push("/");
     if (loggedIn && (route === "/" || route === "/signup")) push("/me");
@@ -146,7 +133,6 @@ export default function App() {
       <h1>TSUMU COINS</h1>
       {flash.text && <div className={`toast ${flash.type}`}>{flash.text}</div>}
 
-      {/* ログイン */}
       {route === "/" && (
         <>
           <div className="card">
@@ -162,7 +148,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* トップでもランキング表示（見出し含め枠内） */}
           <LeaderboardCard
             boardTab={boardTab}
             setBoardTab={setBoardTab}
@@ -174,12 +159,10 @@ export default function App() {
         </>
       )}
 
-      {/* 新規登録 */}
       {route === "/signup" && (
         <SignupCard busy={busy} onSubmit={doSignup} onBack={()=>push("/")} />
       )}
 
-      {/* マイページ */}
       {route === "/me" && loggedIn && (
         <>
           <div className="card">
@@ -204,7 +187,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* マイページ内タブ：履歴 / ランキング */}
           <div className="card">
             <div className="tabs secondary">
               <button className={`tab ${meTab==="history"?"active":""}`} onClick={()=>setMeTab("history")}>自分の履歴</button>
@@ -277,14 +259,13 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
   return (
     <div className="rank-box">
       <h3>
-        ランキング
-        {stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
+        ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
       </h3>
       <div className="tabs">
-        <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数</button>
+        <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数（最新記録）</button>
         <button className={`tab ${boardTab==="daily"?"active":""}`} onClick={()=>setBoardTab("daily")}>前日比</button>
-        <button className={`tab ${boardTab==="7d"?"active":""}`}    onClick={()=>setBoardTab("7d")}>7日間増加</button>
-        <button className={`tab ${boardTab==="30d"?"active":""}`}   onClick={()=>setBoardTab("30d")}>30日間増加</button>
+        <button className={`tab ${boardTab==="7d"?"active":""}`}    onClick={()=>setBoardTab("7d")}>7日間増減</button>
+        <button className={`tab ${boardTab==="30d"?"active":""}`}   onClick={()=>setBoardTab("30d")}>30日間増減</button>
       </div>
 
       <RankListAndBars data={board} unit={labelForTab(boardTab)} />
@@ -304,18 +285,34 @@ function labelForTab(tab) {
   return "枚";
 }
 
+// ★ マイナス対応の棒グラフ（幅=絶対値、色で±を区別）
 function RankListAndBars({ data, unit }) {
-  const max = Math.max(1, ...data.map(d => d.value));
+  const maxAbs = Math.max(1, ...data.map(d => Math.abs(Number(d.value) || 0)));
   return (
     <div className="rank-wrap">
       <ol className="rank-list">
-        {data.map((b, i) => (
-          <li key={`${b.name}-${i}`}>
-            <span className="rank-name">{i+1}. {b.name}</span>
-            <b className="rank-value">{Number(b.value).toLocaleString()} {unit}</b>
-            <div className="bar"><div className="bar-fill" style={{ width: `${(b.value/max)*100}%` }} /></div>
-          </li>
-        ))}
+        {data.map((b, i) => {
+          const val = Number(b.value) || 0;
+          const width = (Math.abs(val) / maxAbs) * 100;
+          const isPos = val >= 0;
+          return (
+            <li key={`${b.name}-${i}`}>
+              <span className="rank-name">{i+1}. {b.name}</span>
+              <b className={`rank-value ${isPos ? "pos" : "neg"}`}>
+                {val.toLocaleString()} {unit}
+              </b>
+              <div className="bar">
+                <div
+                  className="bar-fill"
+                  style={{
+                    width: `${width}%`,
+                    background: isPos ? undefined : "var(--ng)"
+                  }}
+                />
+              </div>
+            </li>
+          );
+        })}
         {data.length===0 && <li style={{opacity:.6}}>まだデータがありません</li>}
       </ol>
     </div>
