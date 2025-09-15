@@ -1,4 +1,4 @@
-// src/api.js — /api/board をブラウザにキャッシュ（stale fallback）
+// src/api.js — board(ランキング) はキャッシュ優先、series は通常取得
 
 const BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
 const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Tokyo";
@@ -43,18 +43,16 @@ export const api = {
   postCoins:    (coins)       => req("/api/coins",    { method: "POST", body: JSON.stringify({ coins }) }),
   myCoins:      (days=30)     => req(`/api/coins?days=${days}`),
 
-  // ランキングは“キャッシュ優先”：ネット(4s)→成功なら保存／失敗はキャッシュ
+  // ランキング（キャッシュ優先）
   board: async (opts = {}) => {
     const params = new URLSearchParams();
-    if (typeof opts === "string") {
-      params.set("date", opts);
-    } else {
+    if (typeof opts === "string") params.set("date", opts);
+    else {
       if (opts.date) params.set("date", opts.date);
       if (opts.mode) params.set("mode", opts.mode);
       if (opts.periodDays) params.set("periodDays", String(opts.periodDays));
     }
-    const q = params.toString();
-    const url = `${BASE}/api/board${q ? `?${q}` : ""}`;
+    const url = `${BASE}/api/board${params.toString() ? `?${params.toString()}` : ""}`;
 
     try {
       const res = await fetchWithTimeout(url, { headers: { "X-Timezone": tz } }, 4000);
@@ -63,10 +61,7 @@ export const api = {
       if ("caches" in window) {
         try {
           const cache = await caches.open(CACHE_NAME);
-          await cache.put(
-            url,
-            new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } })
-          );
+          await cache.put(url, new Response(JSON.stringify(json), { headers: { "Content-Type": "application/json" } }));
         } catch {}
       }
       return { ...json, _fromCache: false };
@@ -81,7 +76,18 @@ export const api = {
           }
         } catch {}
       }
-      return { board: [], date_ymd: typeof opts === "string" ? opts : (opts?.date || ""), _fromCache: true, error: "offline" };
+      return { board: [], _fromCache: true, error: "offline" };
     }
+  },
+
+  // 折れ線グラフ用の時系列
+  boardSeries: async ({ mode="daily", periodDays=7, days=14, top=5, date } = {}) => {
+    const p = new URLSearchParams();
+    p.set("mode", mode);
+    if (periodDays) p.set("periodDays", String(periodDays));
+    if (days) p.set("days", String(days));
+    if (top) p.set("top", String(top));
+    if (date) p.set("date", date);
+    return req(`/api/board_series?${p.toString()}`);
   }
 };
