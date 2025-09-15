@@ -1,10 +1,13 @@
-// src/App.jsx — 「履歴/ランキング」復活 & 数字/グラフトグルを見出し右上に固定
-// 既存CSS (.tabs / .tab / .tab.active など) はそのまま使います。
+// src/App.jsx — 自分の履歴：7日/30日の“日付ベース”増減を表示（キャリーして前日差を合算）
+// ・「自分の履歴 / 全体ランキング」タブあり
+// ・ランキングの「数字/グラフ」トグルは見出し右上（タブ配色）
+// ・グラフは白背景
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import "./App.css";
 
+/* ========= ルーティング（ハッシュ） ========= */
 const useHashRoute = () => {
   const get = () => window.location.hash.replace("#", "") || "/";
   const [route, setRoute] = useState(get);
@@ -17,6 +20,23 @@ const useHashRoute = () => {
   return { route, push };
 };
 
+/* ========= 日付ユーティリティ ========= */
+const toDate = (ymd) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
+};
+const addDays = (ymd, n) => {
+  const dt = toDate(ymd);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+};
+const listDays = (endYmd, len) => {
+  const out = [];
+  for (let i = len - 1; i >= 0; i--) out.push(addDays(endYmd, -i));
+  return out;
+};
+
+/* ========= メイン ========= */
 export default function App() {
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
@@ -38,9 +58,7 @@ export default function App() {
   const [isProvisional, setIsProvisional] = useState(false);
   const [staleBoard, setStaleBoard] = useState(false);
 
-  // マイページ内のタブ（復活）
   const [meTab, setMeTab] = useState("history"); // "history" | "leaderboard"
-
   const { route, push } = useHashRoute();
 
   // 数字 or グラフ（維持）
@@ -50,7 +68,7 @@ export default function App() {
     raw: { mode: "raw" },
     daily: { mode: "daily" },
     "7d": { mode: "period", periodDays: 7 },
-    "30d": { mode: "period", periodDays: 30 },
+    "30d": { mode: "period", periodDays: 30 }
   };
 
   const loadStatus = async () => {
@@ -64,7 +82,8 @@ export default function App() {
 
   const loadMy = async () => {
     if (!loggedIn) { setMyHistory([]); return; }
-    const me = await api.myCoins(14);
+    // 日付ベース30日を安全に計算したいので多めに取得
+    const me = await api.myCoins(120);
     setMyHistory(Array.isArray(me) ? me : []);
   };
 
@@ -195,14 +214,14 @@ export default function App() {
             </div>
           </div>
 
-          {/* ←← ここが復活した部分：マイページ内に履歴/ランキングのタブカード */}
+          {/* マイページ内：履歴/ランキングタブ */}
           <div className="card">
             <div className="tabs secondary">
               <button className={`tab ${meTab==="history"?"active":""}`} onClick={()=>setMeTab("history")}>自分の履歴</button>
               <button className={`tab ${meTab==="leaderboard"?"active":""}`} onClick={()=>setMeTab("leaderboard")}>全体ランキング</button>
             </div>
 
-            {meTab === "history" && <MyHistoryTable rows={myHistory} />}
+            {meTab === "history" && <MyHistoryTable rows={myHistory} endYmd={todayYmd || myHistory[0]?.date_ymd} />}
 
             {meTab === "leaderboard" && (
               <LeaderboardCard
@@ -225,7 +244,7 @@ export default function App() {
   );
 }
 
-/* ─────────── パーツ ─────────── */
+/* ========= パーツ ========= */
 
 function SignupCard({ busy, onSubmit, onBack }) {
   const [n, setN] = useState("");
@@ -243,14 +262,80 @@ function SignupCard({ busy, onSubmit, onBack }) {
   );
 }
 
-function MyHistoryTable({ rows }) {
+/* ====== 自分の履歴（7日・30日を“日付ベース”で計算） ====== */
+function MyHistoryTable({ rows, endYmd }) {
+  // rows: 最新→過去（/api/coins の仕様）
+  // endYmd: 集計の終端日（通常は今日）
+
+  // map: date_ymd -> coins（その日の記録があるものだけ）
+  const byDate = new Map(rows.map(r => [r.date_ymd, Number(r.coins) || 0]));
+
+  // endYmd が未取得時のフォールバック
+  const end = endYmd || rows[0]?.date_ymd;
+  const latestCoins = Number(byDate.get(end) ?? rows[0]?.coins ?? 0);
+
+  // 直近 N 日の「キャリー後の前日差」を作る
+  const makeWindowSum = (N) => {
+    if (!end) return 0;
+
+    // ウィンドウ [start..end]（N日）
+    const days = listDays(end, N);
+    const start = days[0];
+    const dayBeforeStart = addDays(start, -1);
+
+    // start の前日までの最新値（ベースライン）
+    let base = 0;
+    for (const r of rows) {
+      if (r.date_ymd <= dayBeforeStart) { base = Number(r.coins) || 0; break; }
+    }
+
+    // キャリーして各日の値と前日差を算出
+    let last = base;
+    let sum = 0;
+    for (const d of days) {
+      const cur = byDate.has(d) ? byDate.get(d) : last;
+      const diff = cur - last;
+      sum += diff;          // 減少もそのまま合算（ネット増減）
+      last = cur;
+    }
+    return sum;
+  };
+
+  const sum7 = makeWindowSum(7);
+  const sum30 = makeWindowSum(30);
+
+  const Diff = ({ value }) => {
+    const v = Number(value) || 0;
+    const cls = v >= 0 ? "pos" : "neg";
+    return <b className={cls}>{v >= 0 ? `+${v}` : v}</b>;
+  };
+
   return (
     <>
-      <h3>自分の履歴（直近14日）</h3>
+      {/* サマリー：最新/7日/30日（右寄せ） */}
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <h3 style={{ margin: 0 }}>自分の履歴（直近14日）</h3>
+        <div className="row" style={{ gap: 12 }}>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>最新コイン</div>
+            <div style={{ fontWeight: 700 }}>{latestCoins.toLocaleString()}</div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>7日間増減</div>
+            <div style={{ fontWeight: 700 }}><Diff value={sum7} /></div>
+          </div>
+          <div>
+            <div className="muted" style={{ fontSize: 12 }}>30日間増減</div>
+            <div style={{ fontWeight: 700 }}><Diff value={sum30} /></div>
+          </div>
+        </div>
+      </div>
+
+      {/* 表示は従来どおり直近14行（最新→過去） */}
       <table>
         <thead><tr><th>日付</th><th>コイン</th><th>前日比</th></tr></thead>
         <tbody>
-          {rows.map(r=>(
+          {rows.slice(0, 14).map(r => (
             <tr key={r.date_ymd}>
               <td>{r.date_ymd}</td>
               <td>{Number(r.coins).toLocaleString()}</td>
@@ -259,26 +344,29 @@ function MyHistoryTable({ rows }) {
               </td>
             </tr>
           ))}
-          {rows.length===0 && <tr><td colSpan={3} style={{opacity:.6}}>データがありません</td></tr>}
+          {rows.length === 0 && (
+            <tr><td colSpan={3} style={{ opacity: .6 }}>データがありません</td></tr>
+          )}
         </tbody>
       </table>
     </>
   );
 }
 
+/* ====== ランキング（数字/グラフ） ====== */
 function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisional, stale, view, setView }) {
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // タブ→APIパラメータ
+  // タブ→グラフAPIパラメータ
   const toSeriesParams = () => {
     if (boardTab === "raw")   return { mode: "raw",   days: 14, top: 5, date: boardDate };
     if (boardTab === "daily") return { mode: "daily", days: 14, top: 5, date: boardDate };
     if (boardTab === "7d")    return { mode: "period", periodDays: 7,  days: 28, top: 5, date: boardDate };
-    return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate }; // "30d"
+    return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate };
   };
 
-  // view を維持。view が "chart" のときだけ系列を取得
+  // view がグラフのときだけ fetch
   useEffect(() => {
     if (view !== "chart") return;
     let cancelled = false;
@@ -296,7 +384,7 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
 
   return (
     <div className="rank-box">
-      {/* 見出し行：右上に数字/グラフのタブを固定（CSS変更なし、インラインでflex） */}
+      {/* 見出し行：右上に「数字/グラフ」トグル（既存タブ配色） */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>
           ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
@@ -307,7 +395,7 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
         </div>
       </div>
 
-      {/* 指標タブ（下の薄青/濃青ボタン） */}
+      {/* 指標タブ */}
       <div className="tabs">
         <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数（最新記録）</button>
         <button className={`tab ${boardTab==="daily"?"active":""}`} onClick={()=>setBoardTab("daily")}>前日比</button>
@@ -370,7 +458,7 @@ function RankListAndBars({ data, unit }) {
   );
 }
 
-/* ─────────── LineChart（白背景版） ─────────── */
+/* ====== 折れ線グラフ（白背景版） ====== */
 function LineChart({ series, unit }) {
   const dates = (series[0]?.points || []).map(p => p.date_ymd);
   const allVals = series.flatMap(s => s.points.map(p => p.value));
@@ -384,11 +472,10 @@ function LineChart({ series, unit }) {
     return H - pad - t * chartH;
   };
 
-  // 白背景に合わせた色
-  const axisColor = "#cbd5e1";              // ライトグレー（枠線・軸）
-  const gridColor = "rgba(0,0,0,.06)";      // 薄いグリッド
-  const tickColor = "#475569";              // 目盛り文字（slate-600）
-  const zeroColor = "#ef4444";              // 0ライン（赤）
+  const axisColor = "#cbd5e1";         // ライトグレー（枠線・軸）
+  const gridColor = "rgba(0,0,0,.06)"; // 薄いグリッド
+  const tickColor = "#475569";         // 目盛り文字
+  const zeroColor = "#ef4444";         // 0ライン（赤）
 
   const axisY0 = y(0);
   const color = (i) => `hsl(${(i*67)%360} 70% 45%)`;
@@ -397,13 +484,7 @@ function LineChart({ series, unit }) {
     <div style={{ width: "100%", overflowX: "auto" }}>
       <svg
         viewBox={`0 0 ${W} ${H}`}
-        style={{
-          width: "100%",
-          height: "auto",
-          background: "#fff",                // ← 背景白
-          border: "1px solid #e5e7eb",       // ライトグレーの枠
-          borderRadius: 10
-        }}
+        style={{ width: "100%", height: "auto", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10 }}
       >
         {/* axes */}
         <line x1={pad} y1={y(minV)} x2={pad} y2={y(maxV)} stroke={axisColor} strokeWidth="1" />
