@@ -379,7 +379,7 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
       {/* 見出し + 右上トグル */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>
-          ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
+          ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}></small>}
         </h3>
         <div className="tabs" style={{ margin: 0, flexWrap: "nowrap" }}>
           <button className={`tab ${view === "list" ? "active" : ""}`}  onClick={()=>setView("list")}>数字</button>
