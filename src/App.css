@@ -125,3 +125,11 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
 .bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 8px; transition: width .3s ease; }
 
 footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
+
+.subcard { padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; margin-top: 8px; }
+.edit-list { list-style: none; padding: 0; margin: 8px 0 0; }
+.edit-row { display:flex; align-items:center; gap:12px; padding:8px 0; border-bottom:1px dashed #eee; }
+.edit-row:last-child { border-bottom: none; }
+.edit-row .date { width: 110px; color:#334155; }
+.edit-input { width: 160px; }
+.error { color: #ef4444; }

@@ -1,71 +1,73 @@
 // src/api.js
-// GET では余計なヘッダを付けずプリフライトを避ける。POST系は Content-Type を付与。
 const BASE = import.meta.env.VITE_API_BASE || "http://localhost:3001";
-
 const getToken = () => localStorage.getItem("token");
-const auth = () => (getToken() ? { Authorization: `Bearer ${getToken()}` } : {});
+const authHeader = () => ({ Authorization: `Bearer ${getToken()}` });
 
-async function req(path, init = {}) {
-  const isGet = !init.method || init.method.toUpperCase() === "GET";
-  const headers = {
-    ...(isGet ? {} : { "Content-Type": "application/json" }),
-    ...auth(),
-    ...(init.headers || {}),
-  };
-  const r = await fetch(`${BASE}${path}`, { ...init, headers });
-  const text = await r.text();
-  const json = text ? JSON.parse(text) : {};
-  if (!r.ok) return { error: json.error || r.statusText, status: r.status };
-  return json;
+async function req(path, opts = {}) {
+  const r = await fetch(`${BASE}${path}`, opts);
+  // CORS/ネットワークで落ちた場合にも備える
+  if (!r.ok) {
+    let msg = "";
+    try { msg = (await r.json()).error || ""; } catch {}
+    throw new Error(msg || `HTTP ${r.status}`);
+  }
+  return r.json();
 }
 
 export const api = {
-  // 認証まわり
-  register(name, pin) {
+  async status() { return req("/api/status"); },
+
+  async register(name, pin) {
     return req("/api/register", {
       method: "POST",
-      body: JSON.stringify({ name, pin }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pin })
     });
   },
-  login(name, pin) {
+
+  async login(name, pin) {
     return req("/api/login", {
       method: "POST",
-      body: JSON.stringify({ name, pin }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, pin })
     });
   },
 
-  // 自分情報・履歴
-  status() {
-    return req("/api/status");
-  },
-  myCoins(days = 30) {
-    return req(`/api/coins?days=${days}`);
-  },
-  postCoins(coins) {
+  async postCoins(coins) {
     return req("/api/coins", {
       method: "POST",
-      body: JSON.stringify({ coins }),
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ coins })
     });
   },
 
-  // ランキング（数値）
-  board(opts = {}) {
-    const p = new URLSearchParams();
-    if (opts.date) p.set("date", opts.date);
-    if (opts.mode) p.set("mode", String(opts.mode));
-    if (opts.periodDays) p.set("periodDays", String(opts.periodDays));
-    const qs = p.toString();
-    return req(`/api/board${qs ? `?${qs}` : ""}`);
+  async patchCoins(date_ymd, coins) {
+    return req(`/api/coins/${date_ymd}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ coins })
+    });
   },
 
-  // ランキング（グラフ）
-  boardSeries({ mode = "daily", periodDays = 7, days = 14, top = 5, date } = {}) {
-    const p = new URLSearchParams();
-    p.set("mode", mode);
-    p.set("periodDays", String(periodDays));
-    p.set("days", String(days));
-    p.set("top", String(top));
-    if (date) p.set("date", date);
-    return req(`/api/board_series?${p.toString()}`);
+  async myCoins(days = 30) {
+    return req(`/api/coins?days=${days}`, {
+      headers: { ...authHeader() }
+    });
   },
+
+  async myLatest(limit = 7) {
+    return req(`/api/my_latest?limit=${limit}`, {
+      headers: { ...authHeader() }
+    });
+  },
+
+  async board(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return req(`/api/board${q ? `?${q}` : ""}`);
+  },
+
+  async boardSeries(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return req(`/api/board_series${q ? `?${q}` : ""}`);
+  }
 };

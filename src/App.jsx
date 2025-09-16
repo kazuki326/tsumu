@@ -208,6 +208,10 @@ export default function App() {
                 setCoins(""); window.location.hash="/";
               }}>ログアウト</button>
             </div>
+              <RecentEditPanel
+                canEditToday={canEdit}
+                onUpdated={async () => { await Promise.all([loadMy(), loadBoard()]); }}
+              />
           </div>
 
           {/* マイページ内：履歴/ランキングタブ */}
@@ -513,6 +517,97 @@ function LineChart({ series, unit }) {
         ))}
       </svg>
       <div className="muted" style={{ marginTop: 6 }}>単位: {unit}</div>
+    </div>
+  );
+}
+
+
+/* ====== 直近の記録を修正するパネル ====== */
+function RecentEditPanel({ canEditToday, onUpdated }) {
+  const [rows, setRows] = useState([]);
+  const [editing, setEditing] = useState(null); // { date, coins }
+  const [newCoins, setNewCoins] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const load = async () => {
+    try {
+      const r = await api.myLatest(7);
+      setRows(Array.isArray(r) ? r : []);
+    } catch (e) {
+      setRows([]);
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const startEdit = (date, coins) => {
+    setEditing({ date, coins });
+    setNewCoins(String(coins));
+    setErr("");
+  };
+  const cancel = () => { setEditing(null); setNewCoins(""); setErr(""); };
+
+  const save = async () => {
+    const n = Number(newCoins);
+    if (!Number.isInteger(n) || n < 0) { setErr("0以上の整数で入力してね"); return; }
+    setBusy(true);
+    try {
+      await api.patchCoins(editing.date, n);
+      cancel();
+      await load();
+      onUpdated?.(); // 親に「更新したよ」を通知（履歴・ランキング再読込用）
+    } catch (e) {
+      setErr(e.message || "更新に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const today = new Date().toISOString().slice(0,10);
+  return (
+    <div className="subcard">
+      <div className="row" style={{justifyContent:"space-between", alignItems:"center"}}>
+        <h3 style={{margin:0}}>直近の記録（修正）</h3>
+        <span className="muted" style={{fontSize:12}}>
+          {canEditToday ? "※今日の分のみ修正可能（23:59まで）" : "※本日は確定済みです"}
+        </span>
+      </div>
+
+      <ul className="edit-list">
+        {rows.map(r => {
+          const isToday = r.date_ymd === today;
+          return (
+            <li key={r.date_ymd} className="edit-row">
+              <span className="date">{r.date_ymd}</span>
+              {editing?.date === r.date_ymd ? (
+                <>
+                  <input
+                    className="edit-input"
+                    value={newCoins}
+                    onChange={e=>setNewCoins(e.target.value.replace(/[^\d]/g,""))}
+                    inputMode="numeric"
+                  />
+                  <button disabled={busy} onClick={save}>保存</button>
+                  <button className="ghost" disabled={busy} onClick={cancel}>キャンセル</button>
+                  {err && <span className="error" style={{marginLeft:8}}>{err}</span>}
+                </>
+              ) : (
+                <>
+                  <b>{Number(r.coins).toLocaleString()} 枚</b>
+                  <button
+                    className="ghost"
+                    disabled={!isToday || !canEditToday}
+                    onClick={()=>startEdit(r.date_ymd, r.coins)}
+                  >
+                    編集
+                  </button>
+                </>
+              )}
+            </li>
+          );
+        })}
+        {rows.length === 0 && <li className="muted">まだ記録がありません</li>}
+      </ul>
     </div>
   );
 }

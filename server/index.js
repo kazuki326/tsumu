@@ -323,6 +323,86 @@ app.get("/api/coins", auth, async (req, res) => {
   res.json(withDiff);
 });
 
+/* ================= 直近の自分の記録: GET /api/my_latest =================
+   認証必須。limit 件だけ（デフォ 7）“記録がある日”を新しい順で返す。
+   返却: [{date_ymd, coins}]
+========================================================================= */
+app.get("/api/my_latest", auth, async (req, res) => {
+  const limit = Math.max(1, Math.min(30, Number(req.query.limit || 7)));
+  try {
+    const rows = await sqlAll(
+      "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
+      [req.user.uid, limit]
+    );
+    res.json(rows.map(r => ({ date_ymd: normYMD(r.date_ymd), coins: Number(r.coins)||0 })));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+/* ================ 記録の修正: PATCH /api/coins/:date =====================
+   認証必須。:date は YYYY-MM-DD。
+   仕様:
+     - 基本は「今日の分のみ修正可」。23:59 確定後は 403。
+     - 過去日も直したい場合は、環境変数 ALLOW_PAST_EDITS=1 で許可。
+   body: { coins: number }
+   返却: { date_ymd, coins } を返す
+============================================================================ */
+app.patch("/api/coins/:date", auth, async (req, res) => {
+  const date_ymd = String(req.params.date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date_ymd)) {
+    return res.status(400).json({ error: "invalid date" });
+  }
+  const coins = Number(req.body?.coins);
+  if (!Number.isInteger(coins) || coins < 0) {
+    return res.status(400).json({ error: "coins must be non-negative integer" });
+  }
+
+  // 編集許可判定
+  const today = jstDateYMD();
+  const allowPast = process.env.ALLOW_PAST_EDITS === "1";
+  const now = jstNow();
+  const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
+
+  if (date_ymd !== today && !allowPast) {
+    return res.status(403).json({ error: "editing past days is locked" });
+  }
+  if (date_ymd === today && !canEditToday) {
+    return res.status(403).json({ error: "today is already finalized" });
+  }
+
+  try {
+    const exist = await sqlGet(
+      "SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?",
+      [req.user.uid, date_ymd]
+    );
+    if (!exist) {
+      return res.status(404).json({ error: "record not found for that date" });
+    }
+
+    if (USE_PG) {
+      await sqlRun(
+        "UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?",
+        [coins, exist.id]
+      );
+    } else {
+      await sqlRun(
+        "UPDATE coin_logs SET coins=?, created_at=? WHERE id=?",
+        [coins, nowISO(), exist.id]
+      );
+    }
+
+    // ランキングなどに即反映させたいのでキャッシュ破棄
+    clearCache();
+    res.json({ date_ymd, coins });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+
 
 /* ============= ランキング（数値）：/api/board =============
    クエリ:
