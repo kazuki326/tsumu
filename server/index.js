@@ -417,8 +417,8 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
    定義:
      raw    = 指定日までの最新値
      daily  = 指定日の前日比
-     period = 期間内「記録日の前日比（diff）」の総和
-              └ 期間最初の記録の diff は「窓開始日前の直近記録」との差
+     period = 期間内に“存在する記録同士”の前日差(diff)を合計
+              └ 期間開始日前の基準値は使わない（最初の1件は差分0）
 ============================================================= */
 app.get("/api/board", async (req, res) => {
   const date = (req.query.date || jstDateYMD()).slice(0, 10);
@@ -435,6 +435,7 @@ app.get("/api/board", async (req, res) => {
     const board = [];
 
     for (const u of users) {
+      // 指定日までの最新値と、その直前
       const lastOnOrBefore = await sqlGet(
         "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd DESC LIMIT 1",
         [u.id, date]
@@ -453,21 +454,19 @@ app.get("/api/board", async (req, res) => {
         const vPrev = prevBeforeDate?.coins || 0;
         value = vLast - vPrev;
       } else {
-        // period: 期間内「記録日の diff」総和
-        const beforeStart = await sqlGet(
-          "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
-          [u.id, startDate]
-        );
+        // period: 期間内“に存在する記録同士”の差分のみ合計（= 履歴画面のやり方）
         const rows = await sqlAll(
           "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd >= ? AND date_ymd <= ? ORDER BY date_ymd ASC",
           [u.id, startDate, date]
         );
-        let last = beforeStart?.coins || 0;
+
+        let prev = null; // 期間内の直前レコード（期間外は見ない）
         let sum = 0;
         for (const r of rows) {
-          const diff = (r.coins || 0) - last;
-          sum += diff;
-          last = r.coins || 0;
+          if (prev !== null) {
+            sum += (Number(r.coins) || 0) - (Number(prev.coins) || 0);
+          }
+          prev = r;
         }
         value = sum;
       }
@@ -484,6 +483,7 @@ app.get("/api/board", async (req, res) => {
     res.status(500).json({ error: "server error" });
   }
 });
+
 
 /* =========== ランキング（折れ線グラフ）：/api/board_series ===========
    クエリ:
