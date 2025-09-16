@@ -1,5 +1,8 @@
 // src/App.jsx
-// 変更点：自分の履歴の「7日間増減」「30日間増減」は、表示中の“前日比(diff)”の総和で計算
+// ・自分の履歴：7日/30日 = “前日比(diff)の総和”
+// ・ランキング：数字/グラフ切替（右上トグル）・白背景折れ線
+// ・「直近の記録（修正）」は折りたたみ（details/summary）＋ 過去編集フラグ対応
+//   - /api/status から allowPastEdits / pastEditMaxDays を受け取り編集可否を制御
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
@@ -42,6 +45,8 @@ export default function App() {
 
   const [todayYmd, setTodayYmd] = useState("");
   const [canEdit, setCanEdit] = useState(true);
+  const [allowPastEdits, setAllowPastEdits] = useState(false);
+  const [pastEditMaxDays, setPastEditMaxDays] = useState(0);
 
   const [myHistory, setMyHistory] = useState([]);
 
@@ -71,6 +76,9 @@ export default function App() {
       setCanEdit(!!st.canEditToday);
       setTodayYmd(st.today_ymd || "");
       setBoardDate(st.board_date_ymd || "");
+      // ★ 過去編集フラグを反映
+      setAllowPastEdits(!!st.allowPastEdits);
+      setPastEditMaxDays(Number(st.pastEditMaxDays || 0));
     }
   };
 
@@ -208,10 +216,14 @@ export default function App() {
                 setCoins(""); window.location.hash="/";
               }}>ログアウト</button>
             </div>
-              <RecentEditPanel
-                canEditToday={canEdit}
-                onUpdated={async () => { await Promise.all([loadMy(), loadBoard()]); }}
-              />
+
+            {/* 折りたたみ：直近の記録（修正） */}
+            <RecentEditPanel
+              canEditToday={canEdit}
+              allowPastEdits={allowPastEdits}
+              pastEditMaxDays={pastEditMaxDays}
+              onUpdated={async ()=>{ await Promise.all([loadMy(), loadBoard()]); }}
+            />
           </div>
 
           {/* マイページ内：履歴/ランキングタブ */}
@@ -271,10 +283,9 @@ function SignupCard({ busy, onSubmit, onBack }) {
 function MyHistoryTable({ rows, endYmd }) {
   // rows: 最新→過去。各要素 { date_ymd, coins, diff }（diff は前の“記録”との比較）
   // endYmd: 集計終端日（通常は今日）
-
   const end = endYmd || rows[0]?.date_ymd || "";
 
-  // 直近 N「日」の範囲に入る行の diff を合計する（= 表示している“前日比”の総和）
+  // 直近 N「日」の範囲に入る行の diff を合計（＝表示中の前日比の総和）
   const sumDiffsWindow = (N) => {
     if (!end) return 0;
     const start = addDays(end, -(N - 1));
@@ -521,8 +532,8 @@ function LineChart({ series, unit }) {
   );
 }
 
-/* ====== 直近の記録を修正するパネル（折りたたみ） ====== */
-function RecentEditPanel({ canEditToday, onUpdated, defaultOpen = false }) {
+/* ====== 直近の記録を修正するパネル（折りたたみ＆過去編集対応） ====== */
+function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0, onUpdated, defaultOpen=false }) {
   const [rows, setRows] = useState([]);
   const [editing, setEditing] = useState(null); // { date, coins }
   const [newCoins, setNewCoins] = useState("");
@@ -531,7 +542,7 @@ function RecentEditPanel({ canEditToday, onUpdated, defaultOpen = false }) {
 
   const load = async () => {
     try {
-      const r = await api.myLatest(7);
+      const r = await api.myLatest(30); // 過去日も見られるよう少し広めに
       setRows(Array.isArray(r) ? r : []);
     } catch {
       setRows([]);
@@ -563,6 +574,16 @@ function RecentEditPanel({ canEditToday, onUpdated, defaultOpen = false }) {
   };
 
   const today = new Date().toISOString().slice(0, 10);
+  const daysDiff = (a, b) =>
+    Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z"))/86400000);
+
+  // その日が編集可能か？
+  const isEditable = (ymd) => {
+    if (ymd === today) return canEditToday;
+    if (!allowPastEdits) return false;
+    if (!pastEditMaxDays) return true;              // 0=無制限
+    return Math.abs(daysDiff(ymd, today)) <= pastEditMaxDays;
+  };
 
   return (
     <details className="collapse" open={defaultOpen}>
@@ -572,44 +593,47 @@ function RecentEditPanel({ canEditToday, onUpdated, defaultOpen = false }) {
           <span>直近の記録（修正）</span>
         </div>
         <span className="muted small">
-          {canEditToday ? "※今日の分のみ修正可（23:59まで）" : "※本日は確定済みです"}
+          {canEditToday
+            ? allowPastEdits
+              ? (pastEditMaxDays ? `※過去${pastEditMaxDays}日まで修正可（今日23:59まで今日も可）` : "※過去分も修正可（今日23:59まで今日も可）")
+              : "※今日の分のみ修正可（23:59まで）"
+            : allowPastEdits
+              ? (pastEditMaxDays ? `※過去${pastEditMaxDays}日まで修正可（本日は確定済み）` : "※過去分は修正可（本日は確定済み）")
+              : "※本日は確定済み"}
         </span>
       </summary>
 
       <div className="collapse-body">
         <ul className="edit-list">
-          {rows.map(r => {
-            const isToday = r.date_ymd === today;
-            return (
-              <li key={r.date_ymd} className="edit-row">
-                <span className="date">{r.date_ymd}</span>
-                {editing?.date === r.date_ymd ? (
-                  <>
-                    <input
-                      className="edit-input"
-                      value={newCoins}
-                      onChange={e=>setNewCoins(e.target.value.replace(/[^\d]/g,""))}
-                      inputMode="numeric"
-                    />
-                    <button disabled={busy} onClick={save}>保存</button>
-                    <button className="ghost" disabled={busy} onClick={cancel}>キャンセル</button>
-                    {err && <span className="error" style={{marginLeft:8}}>{err}</span>}
-                  </>
-                ) : (
-                  <>
-                    <b>{Number(r.coins).toLocaleString()} 枚</b>
-                    <button
-                      className="ghost"
-                      disabled={!isToday || !canEditToday}
-                      onClick={()=>startEdit(r.date_ymd, r.coins)}
-                    >
-                      編集
-                    </button>
-                  </>
-                )}
-              </li>
-            );
-          })}
+          {rows.map(r => (
+            <li key={r.date_ymd} className="edit-row">
+              <span className="date">{r.date_ymd}</span>
+              {editing?.date === r.date_ymd ? (
+                <>
+                  <input
+                    className="edit-input"
+                    value={newCoins}
+                    onChange={e=>setNewCoins(e.target.value.replace(/[^\d]/g,""))}
+                    inputMode="numeric"
+                  />
+                  <button disabled={busy} onClick={save}>保存</button>
+                  <button className="ghost" disabled={busy} onClick={cancel}>キャンセル</button>
+                  {err && <span className="error" style={{marginLeft:8}}>{err}</span>}
+                </>
+              ) : (
+                <>
+                  <b>{Number(r.coins).toLocaleString()} 枚</b>
+                  <button
+                    className="ghost"
+                    disabled={!isEditable(r.date_ymd)}
+                    onClick={()=>startEdit(r.date_ymd, r.coins)}
+                  >
+                    編集
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
           {rows.length === 0 && <li className="muted">まだ記録がありません</li>}
         </ul>
       </div>

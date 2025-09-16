@@ -206,12 +206,19 @@ app.get("/api/status", (_req, res) => {
   const today = jstDateYMD();
   const now = jstNow();
   const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
+
+  const allowPastEdits = process.env.ALLOW_PAST_EDITS === "1";
+  const pastEditMaxDays = parseInt(process.env.PAST_EDIT_MAX_DAYS || "30", 10); // 0 なら無制限
+
   res.json({
     today_ymd: today,
     canEditToday,
-    board_date_ymd: canEditToday ? today : today, // 表示用。運用に合わせて調整可
+    board_date_ymd: today,
+    allowPastEdits,
+    pastEditMaxDays
   });
 });
+
 
 // 新規登録
 app.post("/api/register", async (req, res) => {
@@ -349,6 +356,14 @@ app.get("/api/my_latest", auth, async (req, res) => {
    body: { coins: number }
    返却: { date_ymd, coins } を返す
 ============================================================================ */
+const toDate = (ymd) => {
+  const [y,m,d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m-1, d));
+};
+const daysDiff = (aYmd, bYmd) =>
+  Math.floor((toDate(bYmd) - toDate(aYmd)) / 86400000);
+
+// 既存の PATCH /api/coins/:date をこの版に置き換え
 app.patch("/api/coins/:date", auth, async (req, res) => {
   const date_ymd = String(req.params.date || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date_ymd)) {
@@ -359,17 +374,24 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
     return res.status(400).json({ error: "coins must be non-negative integer" });
   }
 
-  // 編集許可判定
   const today = jstDateYMD();
-  const allowPast = process.env.ALLOW_PAST_EDITS === "1";
   const now = jstNow();
   const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
 
-  if (date_ymd !== today && !allowPast) {
-    return res.status(403).json({ error: "editing past days is locked" });
-  }
-  if (date_ymd === today && !canEditToday) {
-    return res.status(403).json({ error: "today is already finalized" });
+  const allowPast = process.env.ALLOW_PAST_EDITS === "1";
+  const pastMax = parseInt(process.env.PAST_EDIT_MAX_DAYS || "30", 10); // 0 無制限
+
+  // 許可判定
+  if (date_ymd === today) {
+    if (!canEditToday) return res.status(403).json({ error: "today is already finalized" });
+  } else {
+    if (!allowPast) {
+      return res.status(403).json({ error: "editing past days is locked" });
+    }
+    const diff = Math.abs(daysDiff(date_ymd, today));
+    if (pastMax > 0 && diff > pastMax) {
+      return res.status(403).json({ error: `only past ${pastMax} days can be edited` });
+    }
   }
 
   try {
@@ -377,30 +399,22 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
       "SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?",
       [req.user.uid, date_ymd]
     );
-    if (!exist) {
-      return res.status(404).json({ error: "record not found for that date" });
-    }
+    if (!exist) return res.status(404).json({ error: "record not found for that date" });
 
     if (USE_PG) {
-      await sqlRun(
-        "UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?",
-        [coins, exist.id]
-      );
+      await sqlRun("UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?", [coins, exist.id]);
     } else {
-      await sqlRun(
-        "UPDATE coin_logs SET coins=?, created_at=? WHERE id=?",
-        [coins, nowISO(), exist.id]
-      );
+      await sqlRun("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?", [coins, nowISO(), exist.id]);
     }
 
-    // ランキングなどに即反映させたいのでキャッシュ破棄
-    clearCache();
+    clearCache(); // ランキングに即反映
     res.json({ date_ymd, coins });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "server error" });
   }
 });
+
 
 
 
