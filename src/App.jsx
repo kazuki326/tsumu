@@ -561,6 +561,11 @@ function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
+  // 追加用
+  const [addDate, setAddDate] = useState(() => new Date().toISOString().slice(0,10));
+  const [addCoins, setAddCoins] = useState("");
+  const [addErr, setAddErr] = useState("");
+
   const load = async () => {
     try {
       const r = await api.myLatest(30); // 過去日も見られるよう少し広めに
@@ -598,7 +603,7 @@ function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0
   const daysDiff = (a, b) =>
     Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z"))/86400000);
 
-  // その日が編集可能か？
+  // その日が編集/追加可能か？
   const isEditable = (ymd) => {
     if (ymd === today) return canEditToday;
     if (!allowPastEdits) return false;
@@ -606,25 +611,90 @@ function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0
     return Math.abs(daysDiff(ymd, today)) <= pastEditMaxDays;
   };
 
+  // 追加保存
+  const saveNew = async () => {
+    const d = (addDate || "").trim();
+    const n = Number(addCoins);
+    setAddErr("");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { setAddErr("日付を YYYY-MM-DD で指定してね"); return; }
+    if (!Number.isInteger(n) || n < 0) { setAddErr("コインは0以上の整数で"); return; }
+    if (!isEditable(d)) { setAddErr("その日は追加・修正できない設定です"); return; }
+    if (rows.some(r => r.date_ymd === d)) {
+      setAddErr("その日は既に記録があります（上の編集から変更してね）");
+      return;
+    }
+    setBusy(true);
+    try {
+      // サーバが upsert 対応ならこのままでOK
+      await api.patchCoins(d, n);
+      setAddCoins("");
+      await load();
+      onUpdated?.();
+    } catch (e) {
+      setAddErr(e.message || "追加に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <details className="collapse" open={defaultOpen}>
       <summary className="collapse-summary">
         <div className="summary-left">
           <span className="chev">▶</span>
-          <span>直近の記録（修正）</span>
+          <span>直近の記録（修正・追加）</span>
         </div>
         <span className="muted small">
           {canEditToday
             ? allowPastEdits
-              ? (pastEditMaxDays ? `※過去${pastEditMaxDays}日まで修正可（今日23:59まで今日も可）` : "※過去分も修正可（今日23:59まで今日も可）")
-              : "※今日の分のみ修正可（23:59まで）"
+              ? (pastEditMaxDays ? `※過去${pastEditMaxDays}日まで修正/追加可（今日23:59まで今日も可）` : "※過去分も修正/追加可（今日23:59まで今日も可）")
+              : "※今日の分のみ修正（23:59まで）"
             : allowPastEdits
-              ? (pastEditMaxDays ? `※過去${pastEditMaxDays}日まで修正可（本日は確定済み）` : "※過去分は修正可（本日は確定済み）")
+              ? (pastEditMaxDays ? `※過去${pastEditMaxDays}日まで修正/追加可（本日は確定済み）` : "※過去分は修正/追加可（本日は確定済み）")
               : "※本日は確定済み"}
         </span>
       </summary>
 
       <div className="collapse-body">
+        {/* ▼ 未登録日の追加フォーム */}
+        <div className="subcard" style={{marginTop:0}}>
+          <h4 style={{margin:"0 0 6px"}}>保存し忘れた日を追加</h4>
+          <div className="row" style={{alignItems:"center"}}>
+            <label className="small" style={{display:"flex", alignItems:"center", gap:6}}>
+              日付
+              <input
+                type="date"
+                value={addDate}
+                onChange={e=>setAddDate(e.target.value)}
+                style={{width:170}}
+              />
+            </label>
+            <label className="small" style={{display:"flex", alignItems:"center", gap:6}}>
+              コイン
+              <input
+                value={addCoins}
+                onChange={e=>setAddCoins(e.target.value.replace(/[^\d]/g,""))}
+                inputMode="numeric"
+                placeholder="0"
+                style={{width:140, textAlign:"right"}}
+              />
+            </label>
+            <button
+              onClick={saveNew}
+              disabled={busy || !addDate || addCoins==="" || !isEditable(addDate)}
+            >
+              追加
+            </button>
+            {addErr && <span className="error" style={{marginLeft:8}}>{addErr}</span>}
+          </div>
+          {!isEditable(addDate) && (
+            <div className="muted small" style={{marginTop:6}}>
+              ※この日は現在の設定では追加できません（過去編集許可と範囲をご確認ください）
+            </div>
+          )}
+        </div>
+
+        {/* ▼ 既存日の編集一覧 */}
         <ul className="edit-list">
           {rows.map(r => (
             <li key={r.date_ymd} className="edit-row">
@@ -661,6 +731,7 @@ function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0
     </details>
   );
 }
+
 
 /* ====== 年末までの試算（平均◯枚/日） ====== */
 function YearEndProjection({ todayYmd, baseCoins, defaultOpen=false }) {
