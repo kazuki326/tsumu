@@ -1,4 +1,7 @@
 // src/App.jsx
+// ・ログイン/サインアップ後に「ようこそ◯◯さん」を表示し、displayName を保持
+// ・マイページ見出し下に常時「ようこそ◯◯さん」
+// ・年末(12/31)までの試算パネルを追加（既定 50,000 枚/日、ユーザー編集可＆localStorage保存）
 // ・自分の履歴：7日/30日 = “前日比(diff)の総和”
 // ・ランキング：数字/グラフ切替（右上トグル）・白背景折れ線
 // ・「直近の記録（修正）」は折りたたみ（details/summary）＋ 過去編集フラグ対応
@@ -34,6 +37,9 @@ const addDays = (ymd, n) => {
 
 /* ========== メイン ========== */
 export default function App() {
+  // 表示名（ログイン/登録時に保存）
+  const [displayName, setDisplayName] = useState(() => localStorage.getItem("displayName") || "");
+
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [coins, setCoins] = useState("");
@@ -112,6 +118,9 @@ export default function App() {
       if (res.token) {
         localStorage.setItem("token", res.token);
         setToken(res.token);
+        localStorage.setItem("displayName", name.trim());
+        setDisplayName(name.trim());
+        setFlash({ type: "success", text: `ようこそ ${name.trim()} さん` });
         setName(""); setPin("");
         push("/me");
       } else {
@@ -127,7 +136,9 @@ export default function App() {
       if (res.token) {
         localStorage.setItem("token", res.token);
         setToken(res.token);
-        setFlash({ type: "success", text: `登録完了！ようこそ ${signupName} さん` });
+        localStorage.setItem("displayName", signupName.trim());
+        setDisplayName(signupName.trim());
+        setFlash({ type: "success", text: `登録完了！ようこそ ${signupName.trim()} さん` });
         setTimeout(() => setFlash({ type: "", text: "" }), 3000);
         push("/me");
       } else {
@@ -156,6 +167,9 @@ export default function App() {
     if (!loggedIn && route === "/me") push("/");
     if (loggedIn && (route === "/" || route === "/signup")) push("/me");
   }, [loggedIn, route]);
+
+  // 自分の最新コイン（年末試算に使用）
+  const latestCoins = useMemo(() => Number(myHistory[0]?.coins ?? 0), [myHistory]);
 
   return (
     <div className="container">
@@ -198,6 +212,9 @@ export default function App() {
         <>
           <div className="card">
             <h2>マイページ</h2>
+            <p className="muted" style={{marginTop:-8}}>
+              ようこそ <b>{displayName || "ゲスト"}</b> さん
+            </p>
             <p className="muted">
               今日は <b>{todayYmd || "(取得中…)"}</b>。{canEdit ? "23:59まで更新できます" : "本日の入力は締切済み（23:59）"}
             </p>
@@ -213,9 +230,13 @@ export default function App() {
               <button disabled={busy || coins === "" || !canEdit} onClick={submitCoins}>保存</button>
               <button className="ghost" disabled={busy} onClick={()=>{
                 localStorage.removeItem("token"); setToken(""); setFlash({ type:"", text:"" });
+                localStorage.removeItem("displayName"); setDisplayName("");
                 setCoins(""); window.location.hash="/";
               }}>ログアウト</button>
             </div>
+
+            {/* 年末までの試算 */}
+            <YearEndProjection todayYmd={todayYmd} baseCoins={latestCoins} />
 
             {/* 折りたたみ：直近の記録（修正） */}
             <RecentEditPanel
@@ -638,5 +659,55 @@ function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0
         </ul>
       </div>
     </details>
+  );
+}
+
+/* ====== 年末までの試算（平均◯枚/日） ====== */
+function YearEndProjection({ todayYmd, baseCoins }) {
+  // 既定値 50,000。ユーザー変更は保存
+  const [avgPerDay, setAvgPerDay] = useState(() => {
+    const v = Number(localStorage.getItem("avgPerDay") || 50000);
+    return Number.isFinite(v) && v >= 0 ? v : 50000;
+  });
+  useEffect(() => { localStorage.setItem("avgPerDay", String(avgPerDay)); }, [avgPerDay]);
+
+  const today = todayYmd || new Date().toISOString().slice(0, 10);
+  const end = `${today.slice(0, 4)}-12-31`;
+
+  const daysDiff = (a, b) =>
+    Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
+
+  // 今日を含む残り日数
+  const remainDays = Math.max(0, daysDiff(today, end) + 1);
+
+  const additional = avgPerDay * remainDays;
+  const projected = (Number(baseCoins) || 0) + additional;
+
+  const fmt = (n) => Number(n).toLocaleString();
+
+  return (
+    <div className="subcard" style={{marginTop:12, padding:"10px 12px", border:"1px solid #e5e7eb", borderRadius:10, background:"#fff"}}>
+      <h3 style={{margin:"0 0 8px"}}>年末までの試算</h3>
+      <div className="row" style={{gap:12, alignItems:"center", flexWrap:"wrap"}}>
+        <label style={{display:"flex", alignItems:"center", gap:8}}>
+          <span className="muted">平均</span>
+          <input
+            value={avgPerDay}
+            onChange={(e)=>setAvgPerDay(Number(e.target.value.replace(/[^\d]/g,"") || 0))}
+            inputMode="numeric"
+            style={{width:120, textAlign:"right"}}
+          />
+          <span className="muted">枚 / 日</span>
+        </label>
+        <span className="muted">｜</span>
+        <span>残り日数（今日含む）：<b>{fmt(remainDays)}</b> 日</span>
+      </div>
+
+      <div className="row" style={{marginTop:8, gap:16, flexWrap:"wrap"}}>
+        <div><div className="muted small">いまのコイン</div><b>{fmt(baseCoins)} 枚</b></div>
+        <div><div className="muted small">見込み追加（年末まで）</div><b>{fmt(additional)} 枚</b></div>
+        <div><div className="muted small">12/31 見込み合計</div><b style={{fontSize:18}}>{fmt(projected)} 枚</b></div>
+      </div>
+    </div>
   );
 }
