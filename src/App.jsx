@@ -236,7 +236,7 @@ export default function App() {
             </div>
 
             {/* 年末までの試算 */}
-            <YearEndProjection todayYmd={todayYmd} baseCoins={latestCoins} />
+            <YearEndProjection todayYmd={todayYmd} baseCoins={latestCoins} defaultOpen={true} />
 
             {/* 折りたたみ：直近の記録（修正） */}
             <RecentEditPanel
@@ -663,7 +663,7 @@ function RecentEditPanel({ canEditToday, allowPastEdits=false, pastEditMaxDays=0
 }
 
 /* ====== 年末までの試算（平均◯枚/日） ====== */
-function YearEndProjection({ todayYmd, baseCoins }) {
+function YearEndProjection({ todayYmd, baseCoins, defaultOpen=false }) {
   // 既定値 50,000。ユーザー変更は保存
   const [avgPerDay, setAvgPerDay] = useState(() => {
     const v = Number(localStorage.getItem("avgPerDay") || 50000);
@@ -686,28 +686,41 @@ function YearEndProjection({ todayYmd, baseCoins }) {
   const fmt = (n) => Number(n).toLocaleString();
 
   return (
-    <div className="subcard" style={{marginTop:12, padding:"10px 12px", border:"1px solid #e5e7eb", borderRadius:10, background:"#fff"}}>
-      <h3 style={{margin:"0 0 8px"}}>年末までの試算</h3>
-      <div className="row" style={{gap:12, alignItems:"center", flexWrap:"wrap"}}>
-        <label style={{display:"flex", alignItems:"center", gap:8}}>
-          <span className="muted">平均</span>
-          <input
-            value={avgPerDay}
-            onChange={(e)=>setAvgPerDay(Number(e.target.value.replace(/[^\d]/g,"") || 0))}
-            inputMode="numeric"
-            style={{width:120, textAlign:"right"}}
-          />
-          <span className="muted">枚 / 日</span>
-        </label>
-        <span className="muted">｜</span>
-        <span>残り日数（今日含む）：<b>{fmt(remainDays)}</b> 日</span>
-      </div>
+    <details className="collapse" open={defaultOpen}>
+      <summary className="collapse-summary">
+        <div className="summary-left">
+          <span className="chev">▶</span>
+          <span>年末までの試算</span>
+        </div>
+        <span className="muted small">
+          目安: 平均 {fmt(avgPerDay)} 枚/日・残り {fmt(remainDays)} 日
+        </span>
+      </summary>
 
-      <div className="row" style={{marginTop:8, gap:16, flexWrap:"wrap"}}>
-        <div><div className="muted small">いまのコイン</div><b>{fmt(baseCoins)} 枚</b></div>
-        <div><div className="muted small">見込み追加（年末まで）</div><b>{fmt(additional)} 枚</b></div>
-        <div><div className="muted small">12/31 見込み合計</div><b style={{fontSize:18}}>{fmt(projected)} 枚</b></div>
+      <div className="collapse-body">
+        <div className="subcard" style={{marginTop:0}}>
+          <div className="row" style={{gap:12, alignItems:"center", flexWrap:"wrap"}}>
+            <label style={{display:"flex", alignItems:"center", gap:8}}>
+              <span className="muted">平均</span>
+              <input
+                value={avgPerDay}
+                onChange={(e)=>setAvgPerDay(Number(e.target.value.replace(/[^\d]/g,"") || 0))}
+                inputMode="numeric"
+                style={{width:140, textAlign:"right"}}
+              />
+              <span className="muted">枚 / 日</span>
+            </label>
+            <span className="muted">｜</span>
+            <span>残り日数（今日含む）：<b>{fmt(remainDays)}</b> 日</span>
+          </div>
+
+          <div className="row" style={{marginTop:8, gap:16, flexWrap:"wrap"}}>
+            <div><div className="muted small">いまのコイン</div><b>{fmt(baseCoins)} 枚</b></div>
+            <div><div className="muted small">見込み追加（年末まで）</div><b>{fmt(additional)} 枚</b></div>
+            <div><div className="muted small">12/31 見込み合計</div><b style={{fontSize:18}}>{fmt(projected)} 枚</b></div>
+          </div>
+        </div>
       </div>
-    </div>
+    </details>
   );
 }

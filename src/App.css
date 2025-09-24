@@ -166,3 +166,13 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
 .edit-input { width: 160px; }
 .error { color: #ef4444; }
 .small { font-size: 12px; }
+
+
+/* 任意: マイページの「ようこそ」行を少しだけ強調 */
+.welcome-line { margin-top: -4px; color: #475569; }
+
+/* 任意: 年末試算の入力ボックスをもう少し小さく */
+.subcard input { max-width: 160px; text-align: right; }
+
+/* 任意: ランキングの数値を右寄せ＆太字に */
+.rank-value { text-align: right; font-weight: 700; }
