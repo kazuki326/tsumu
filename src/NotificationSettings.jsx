@@ -163,12 +163,37 @@ export default function NotificationSettings() {
   };
 
   if (!supported) {
+    // iOSのSafariかどうかを判定
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+    const isInStandaloneMode = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+
     return (
       <div className="card">
         <h2>通知設定</h2>
         <p className="muted">
           お使いのブラウザはプッシュ通知に対応していません。
         </p>
+        {isIOS && !isInStandaloneMode && (
+          <div style={{
+            marginTop: 16,
+            padding: 12,
+            background: '#fef3c7',
+            borderRadius: 8,
+            fontSize: 14
+          }}>
+            <strong>📱 iPhoneでプッシュ通知を使うには：</strong>
+            <ol style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
+              <li>Safari の共有ボタン（↑）をタップ</li>
+              <li>「ホーム画面に追加」を選択</li>
+              <li>追加したアプリアイコンから起動</li>
+              <li>この画面で通知を有効にする</li>
+            </ol>
+            <p className="muted" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+              ※ iOS 16.4 以降が必要です
+            </p>
+          </div>
+        )}
       </div>
     );
   }
