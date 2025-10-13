@@ -57,7 +57,7 @@ export default function App() {
 
   const [myHistory, setMyHistory] = useState([]);
 
-  const [boardTab, setBoardTab] = useState("daily"); // "raw" | "daily" | "7d" | "30d"
+  const [boardTab, setBoardTab] = useState("raw"); // "raw" | "daily" | "7d" | "30d"
   const [board, setBoard] = useState([]);
   const [boardDate, setBoardDate] = useState("");
   const [isProvisional, setIsProvisional] = useState(false);
@@ -217,10 +217,26 @@ export default function App() {
       {route === "/me" && loggedIn && (
         <>
           <div className="card">
-            <h2>マイページ</h2>
-            <p className="muted" style={{marginTop:-8}}>
-              ようこそ <b>{displayName || "ゲスト"}</b> さん
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div>
+                <h2 style={{ margin: 0 }}>マイページ</h2>
+                <p className="muted" style={{ marginTop: 4, marginBottom: 0 }}>
+                  ようこそ <b>{displayName || "ゲスト"}</b> さん
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                <button className="ghost" style={{ padding: '8px 12px', fontSize: 13 }} disabled={busy} onClick={()=>push("/notifications")}>
+                  通知設定
+                </button>
+                <button className="ghost" style={{ padding: '8px 12px', fontSize: 13 }} disabled={busy} onClick={()=>{
+                  localStorage.removeItem("token"); setToken(""); setFlash({ type:"", text:"" });
+                  localStorage.removeItem("displayName"); setDisplayName("");
+                  setCoins(""); window.location.hash="/";
+                }}>
+                  ログアウト
+                </button>
+              </div>
+            </div>
             <p className="muted">
               今日は <b>{todayYmd || "(取得中…)"}</b>。{canEdit ? "23:59まで更新できます" : "本日の入力は締切済み（23:59）"}
             </p>
@@ -234,12 +250,6 @@ export default function App() {
             />
             <div className="row">
               <button disabled={busy || coins === "" || !canEdit} onClick={submitCoins}>保存</button>
-              <button className="ghost" disabled={busy} onClick={()=>push("/notifications")}>通知設定</button>
-              <button className="ghost" disabled={busy} onClick={()=>{
-                localStorage.removeItem("token"); setToken(""); setFlash({ type:"", text:"" });
-                localStorage.removeItem("displayName"); setDisplayName("");
-                setCoins(""); window.location.hash="/";
-              }}>ログアウト</button>
             </div>
 
             {/* 年末までの試算 */}
@@ -342,6 +352,11 @@ function MyHistoryTable({ rows, endYmd }) {
     return <b className={cls}>{v >= 0 ? `+${v}` : v}</b>;
   };
 
+  // スパークライン用データ（直近14日）
+  const sparklineData = rows.slice(0, 14).reverse().map(r => Number(r.coins));
+  const sparkMin = Math.min(...sparklineData, 0);
+  const sparkMax = Math.max(...sparklineData, 1);
+
   return (
     <>
       {/* サマリー */}
@@ -362,6 +377,39 @@ function MyHistoryTable({ rows, endYmd }) {
           </div>
         </div>
       </div>
+
+      {/* スパークライン */}
+      {sparklineData.length > 1 && (
+        <div style={{ marginBottom: 12, padding: "8px 12px", background: "#f9fafb", borderRadius: 8 }}>
+          <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>14日間の推移</div>
+          <svg width="100%" height="40" style={{ display: "block" }}>
+            <polyline
+              points={sparklineData.map((val, i) => {
+                const x = (i / (sparklineData.length - 1)) * 100;
+                const y = 35 - ((val - sparkMin) / (sparkMax - sparkMin || 1)) * 30;
+                return `${x}%,${y}`;
+              }).join(" ")}
+              fill="none"
+              stroke="var(--accent)"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            />
+            {sparklineData.map((val, i) => {
+              const x = (i / (sparklineData.length - 1)) * 100;
+              const y = 35 - ((val - sparkMin) / (sparkMax - sparkMin || 1)) * 30;
+              return (
+                <circle
+                  key={i}
+                  cx={`${x}%`}
+                  cy={y}
+                  r="2.5"
+                  fill="var(--accent)"
+                />
+              );
+            })}
+          </svg>
+        </div>
+      )}
 
       {/* テーブル：最新→過去、14行表示 */}
       <table>
@@ -427,7 +475,7 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
 
       {/* 指標タブ */}
       <div className="tabs">
-        <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数（最新記録）</button>
+        <button className={`tab ${boardTab==="raw"?"active":""}`}   onClick={()=>setBoardTab("raw")}>コイン数</button>
         <button className={`tab ${boardTab==="daily"?"active":""}`} onClick={()=>setBoardTab("daily")}>前日比</button>
         <button className={`tab ${boardTab==="7d"?"active":""}`}    onClick={()=>setBoardTab("7d")}>7日間増減</button>
         <button className={`tab ${boardTab==="30d"?"active":""}`}   onClick={()=>setBoardTab("30d")}>30日間増減</button>
@@ -489,6 +537,7 @@ function RankListAndBars({ data, unit }) {
 
 /* ====== 折れ線グラフ（白背景） ====== */
 function LineChart({ series, unit }) {
+  const [tooltip, setTooltip] = useState(null); // { x, y, date, name, value }
   const dates = (series[0]?.points || []).map(p => p.date_ymd);
   const allVals = series.flatMap(s => s.points.map(p => p.value));
   const minV = Math.min(0, ...allVals);
@@ -510,7 +559,7 @@ function LineChart({ series, unit }) {
   const color = (i) => `hsl(${(i*67)%360} 70% 45%)`;
 
   return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
+    <div style={{ width: "100%", overflowX: "auto", position: "relative" }}>
       <svg
         viewBox={`0 0 ${W} ${H}`}
         style={{ width: "100%", height: "auto", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10 }}
@@ -557,6 +606,47 @@ function LineChart({ series, unit }) {
           return <path key={s.name} d={d} fill="none" stroke={color(idx)} strokeWidth="2" />;
         })}
 
+        {/* data points (clickable) */}
+        {series.map((s,idx)=>
+          s.points.map((p,i)=>(
+            <circle
+              key={`${s.name}-${i}`}
+              cx={x(i)}
+              cy={y(p.value)}
+              r="5"
+              fill={color(idx)}
+              stroke="#fff"
+              strokeWidth="2"
+              style={{ cursor: "pointer" }}
+              onClick={()=>setTooltip({ x: x(i), y: y(p.value), date: p.date_ymd, name: s.name, value: p.value })}
+            />
+          ))
+        )}
+
+        {/* tooltip */}
+        {tooltip && (
+          <g>
+            <rect
+              x={tooltip.x - 60}
+              y={tooltip.y - 60}
+              width="120"
+              height="50"
+              fill="#334155"
+              rx="6"
+              opacity="0.95"
+            />
+            <text x={tooltip.x} y={tooltip.y - 40} textAnchor="middle" fill="#fff" fontSize="11" fontWeight="600">
+              {tooltip.name}
+            </text>
+            <text x={tooltip.x} y={tooltip.y - 26} textAnchor="middle" fill="#e2e8f0" fontSize="10">
+              {tooltip.date}
+            </text>
+            <text x={tooltip.x} y={tooltip.y - 12} textAnchor="middle" fill="#fff" fontSize="12" fontWeight="700">
+              {Number(tooltip.value).toLocaleString()} {unit}
+            </text>
+          </g>
+        )}
+
         {/* legend */}
         {series.map((s,idx)=>(
           <g key={`lg-${s.name}`} transform={`translate(${pad+8},${pad+16+idx*18})`}>
@@ -565,7 +655,21 @@ function LineChart({ series, unit }) {
           </g>
         ))}
       </svg>
-      <div className="muted" style={{ marginTop: 6 }}>単位: {unit}</div>
+      <div className="muted" style={{ marginTop: 6 }}>
+        単位: {unit}
+        {tooltip && (
+          <span style={{ marginLeft: 12 }}>
+            • データポイントをクリックして詳細表示中
+            <button
+              className="link"
+              style={{ marginLeft: 6, fontSize: 12 }}
+              onClick={()=>setTooltip(null)}
+            >
+              閉じる
+            </button>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
