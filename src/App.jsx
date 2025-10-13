@@ -174,7 +174,12 @@ export default function App() {
 
   return (
     <div className="container">
-      <h1>TSUMU COINS</h1>
+      <h1
+        onClick={() => push(loggedIn ? "/me" : "/")}
+        style={{ cursor: 'pointer' }}
+      >
+        TSUMU COINS
+      </h1>
       {flash.text && <div className={`toast ${flash.type}`}>{flash.text}</div>}
 
       {route === "/" && (
