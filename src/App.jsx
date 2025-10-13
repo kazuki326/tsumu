@@ -1,5 +1,11 @@
 // src/App.jsx
-// 変更点：自分の履歴の「7日間増減」「30日間増減」は、表示中の“前日比(diff)”の総和で計算
+// ・ログイン/サインアップ後に「ようこそ◯◯さん」を表示し、displayName を保持
+// ・マイページ見出し下に常時「ようこそ◯◯さん」
+// ・年末(12/31)までの試算パネルを追加（既定 50,000 枚/日、ユーザー編集可＆localStorage保存）
+// ・自分の履歴：7日/30日 = “前日比(diff)の総和”
+// ・ランキング：数字/グラフ切替（右上トグル）・白背景折れ線
+// ・「直近の記録（修正）」は折りたたみ（details/summary）＋ 過去編集フラグ対応
+//   - /api/status から allowPastEdits / pastEditMaxDays を受け取り編集可否を制御
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
@@ -32,6 +38,9 @@ const addDays = (ymd, n) => {
 
 /* ========== メイン ========== */
 export default function App() {
+  // 表示名（ログイン/登録時に保存）
+  const [displayName, setDisplayName] = useState(() => localStorage.getItem("displayName") || "");
+
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [coins, setCoins] = useState("");
@@ -43,6 +52,8 @@ export default function App() {
 
   const [todayYmd, setTodayYmd] = useState("");
   const [canEdit, setCanEdit] = useState(true);
+  const [allowPastEdits, setAllowPastEdits] = useState(false);
+  const [pastEditMaxDays, setPastEditMaxDays] = useState(0);
 
   const [myHistory, setMyHistory] = useState([]);
 
@@ -72,6 +83,9 @@ export default function App() {
       setCanEdit(!!st.canEditToday);
       setTodayYmd(st.today_ymd || "");
       setBoardDate(st.board_date_ymd || "");
+      // ★ 過去編集フラグを反映
+      setAllowPastEdits(!!st.allowPastEdits);
+      setPastEditMaxDays(Number(st.pastEditMaxDays || 0));
     }
   };
 
@@ -105,6 +119,9 @@ export default function App() {
       if (res.token) {
         localStorage.setItem("token", res.token);
         setToken(res.token);
+        localStorage.setItem("displayName", name.trim());
+        setDisplayName(name.trim());
+        setFlash({ type: "success", text: `ようこそ ${name.trim()} さん` });
         setName(""); setPin("");
         push("/me");
       } else {
@@ -120,7 +137,9 @@ export default function App() {
       if (res.token) {
         localStorage.setItem("token", res.token);
         setToken(res.token);
-        setFlash({ type: "success", text: `登録完了！ようこそ ${signupName} さん` });
+        localStorage.setItem("displayName", signupName.trim());
+        setDisplayName(signupName.trim());
+        setFlash({ type: "success", text: `登録完了！ようこそ ${signupName.trim()} さん` });
         setTimeout(() => setFlash({ type: "", text: "" }), 3000);
         push("/me");
       } else {
@@ -149,6 +168,9 @@ export default function App() {
     if (!loggedIn && (route === "/me" || route === "/notifications")) push("/");
     if (loggedIn && (route === "/" || route === "/signup")) push("/me");
   }, [loggedIn, route]);
+
+  // 自分の最新コイン（年末試算に使用）
+  const latestCoins = useMemo(() => Number(myHistory[0]?.coins ?? 0), [myHistory]);
 
   return (
     <div className="container">
@@ -191,6 +213,9 @@ export default function App() {
         <>
           <div className="card">
             <h2>マイページ</h2>
+            <p className="muted" style={{marginTop:-8}}>
+              ようこそ <b>{displayName || "ゲスト"}</b> さん
+            </p>
             <p className="muted">
               今日は <b>{todayYmd || "(取得中…)"}</b>。{canEdit ? "23:59まで更新できます" : "本日の入力は締切済み（23:59）"}
             </p>
@@ -207,9 +232,22 @@ export default function App() {
               <button className="ghost" disabled={busy} onClick={()=>push("/notifications")}>通知設定</button>
               <button className="ghost" disabled={busy} onClick={()=>{
                 localStorage.removeItem("token"); setToken(""); setFlash({ type:"", text:"" });
+                localStorage.removeItem("displayName"); setDisplayName("");
                 setCoins(""); window.location.hash="/";
               }}>ログアウト</button>
             </div>
+
+            {/* 年末までの試算 */}
+            <YearEndProjection todayYmd={todayYmd} baseCoins={latestCoins} defaultOpen={true} />
+
+            {/* 折りたたみ：直近の記録（修正） */}
+            <RecentEditPanel
+              todayYmd={todayYmd}
+              canEditToday={canEdit}
+              allowPastEdits={allowPastEdits}
+              pastEditMaxDays={pastEditMaxDays}
+              onUpdated={async ()=>{ await Promise.all([loadMy(), loadBoard()]); }}
+            />
           </div>
 
           {/* マイページ内：履歴/ランキングタブ */}
@@ -278,10 +316,9 @@ function SignupCard({ busy, onSubmit, onBack }) {
 function MyHistoryTable({ rows, endYmd }) {
   // rows: 最新→過去。各要素 { date_ymd, coins, diff }（diff は前の“記録”との比較）
   // endYmd: 集計終端日（通常は今日）
-
   const end = endYmd || rows[0]?.date_ymd || "";
 
-  // 直近 N「日」の範囲に入る行の diff を合計する（= 表示している“前日比”の総和）
+  // 直近 N「日」の範囲に入る行の diff を合計（＝表示中の前日比の総和）
   const sumDiffsWindow = (N) => {
     if (!end) return 0;
     const start = addDays(end, -(N - 1));
@@ -375,7 +412,7 @@ function LeaderboardCard({ boardTab, setBoardTab, board, boardDate, isProvisiona
       {/* 見出し + 右上トグル */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
         <h3 style={{ margin: 0 }}>
-          ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}>（キャッシュ表示）</small>}
+          ランキング{stale && <small style={{ marginLeft: 8, color: "#6b7280" }}></small>}
         </h3>
         <div className="tabs" style={{ margin: 0, flexWrap: "nowrap" }}>
           <button className={`tab ${view === "list" ? "active" : ""}`}  onClick={()=>setView("list")}>数字</button>
@@ -525,5 +562,216 @@ function LineChart({ series, unit }) {
       </svg>
       <div className="muted" style={{ marginTop: 6 }}>単位: {unit}</div>
     </div>
+  );
+}
+
+/* ====== 直近の記録を修正するパネル（折りたたみ＆過去編集対応） ====== */
+function RecentEditPanel({
+  todayYmd,
+  canEditToday,
+  allowPastEdits = false,
+  pastEditMaxDays = 0,
+  onUpdated,
+  defaultOpen = false
+}) {
+  const [recentMap, setRecentMap] = useState(new Map()); // date_ymd -> {coins}
+  const [editing, setEditing] = useState(null);           // { date, coins? }
+  const [newCoins, setNewCoins] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  // 今日（基準日）
+  const fallbackToday = new Date().toISOString().slice(0, 10);
+  const baseToday = /^\d{4}-\d{2}-\d{2}$/.test(todayYmd || "") ? todayYmd : fallbackToday;
+
+  // 直近7日（今日～6日前）を配列で
+  const last7 = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => addDays(baseToday, -i));
+  }, [baseToday]);
+
+  // データ読み込み（最近の履歴を広めに取ってマップ化）
+  const load = async () => {
+    try {
+      const r = await api.myLatest(60); // 余裕を持って取得
+      const m = new Map();
+      (Array.isArray(r) ? r : []).forEach(row => {
+        if (row?.date_ymd) m.set(row.date_ymd, { coins: Number(row.coins) || 0 });
+      });
+      setRecentMap(m);
+    } catch {
+      setRecentMap(new Map());
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const daysDiff = (a, b) =>
+    Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
+
+  // その日が編集/追加可能か？
+  const isEditable = (ymd) => {
+    if (ymd === baseToday) return canEditToday;
+    if (!allowPastEdits) return false;
+    if (!pastEditMaxDays) return true; // 0=無制限
+    return Math.abs(daysDiff(ymd, baseToday)) <= pastEditMaxDays;
+  };
+
+  const startEdit = (date, coins) => {
+    setEditing({ date });
+    setNewCoins(coins != null ? String(coins) : "");
+    setErr("");
+  };
+  const cancel = () => { setEditing(null); setNewCoins(""); setErr(""); };
+
+  const save = async () => {
+    const n = Number(newCoins);
+    if (!Number.isInteger(n) || n < 0) { setErr("0以上の整数で入力してね"); return; }
+    setBusy(true);
+    try {
+      await api.patchCoins(editing.date, n);  // 既存でも未登録でも upsert を想定
+      cancel();
+      await load();
+      onUpdated?.();
+    } catch (e) {
+      setErr(e.message || "更新に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <details className="collapse" open={defaultOpen}>
+      <summary className="collapse-summary">
+        <div className="summary-left">
+          <span className="chev">▶</span>
+          <span>直近の記録（修正・追加）</span>
+        </div>
+        <span className="muted small">
+          直近7日（{last7[last7.length-1]} ～ {last7[0]}）を表示
+        </span>
+      </summary>
+
+      <div className="collapse-body">
+        <ul className="edit-list">
+          {last7.map((d) => {
+            const rec = recentMap.get(d);                         // ある日付の既存記録
+            const editable = isEditable(d);
+            const isEditing = editing?.date === d;
+
+            return (
+              <li key={d} className="edit-row">
+                <span className="date">{d}</span>
+
+                {isEditing ? (
+                  <>
+                    <input
+                      className="edit-input"
+                      value={newCoins}
+                      onChange={e => setNewCoins(e.target.value.replace(/[^\d]/g, ""))}
+                      inputMode="numeric"
+                      placeholder="0"
+                    />
+                    <button disabled={busy} onClick={save}>保存</button>
+                    <button className="ghost" disabled={busy} onClick={cancel}>キャンセル</button>
+                    {err && <span className="error" style={{ marginLeft: 8 }}>{err}</span>}
+                  </>
+                ) : (
+                  <>
+                    {rec ? (
+                      <>
+                        <b>{Number(rec.coins).toLocaleString()} 枚</b>
+                        <button
+                          className="ghost"
+                          disabled={!editable}
+                          onClick={() => startEdit(d, rec.coins)}
+                        >
+                          編集
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="muted">未登録</span>
+                        <button
+                          disabled={!editable}
+                          onClick={() => startEdit(d, "")}
+                        >
+                          追加
+                        </button>
+                      </>
+                    )}
+                    {!editable && (
+                      <span className="muted small">（この日は変更不可の設定）</span>
+                    )}
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
+
+/* ====== 年末までの試算（平均◯枚/日） ====== */
+function YearEndProjection({ todayYmd, baseCoins, defaultOpen=false }) {
+  // 既定値 50,000。ユーザー変更は保存
+  const [avgPerDay, setAvgPerDay] = useState(() => {
+    const v = Number(localStorage.getItem("avgPerDay") || 50000);
+    return Number.isFinite(v) && v >= 0 ? v : 50000;
+  });
+  useEffect(() => { localStorage.setItem("avgPerDay", String(avgPerDay)); }, [avgPerDay]);
+
+  const today = todayYmd || new Date().toISOString().slice(0, 10);
+  const end = `${today.slice(0, 4)}-12-31`;
+
+  const daysDiff = (a, b) =>
+    Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
+
+  // 今日を含む残り日数
+  const remainDays = Math.max(0, daysDiff(today, end) + 1);
+
+  const additional = avgPerDay * remainDays;
+  const projected = (Number(baseCoins) || 0) + additional;
+
+  const fmt = (n) => Number(n).toLocaleString();
+
+  return (
+    <details className="collapse" open={defaultOpen}>
+      <summary className="collapse-summary">
+        <div className="summary-left">
+          <span className="chev">▶</span>
+          <span>年末までの試算</span>
+        </div>
+        <span className="muted small">
+          目安: 平均 {fmt(avgPerDay)} 枚/日・残り {fmt(remainDays)} 日
+        </span>
+      </summary>
+
+      <div className="collapse-body">
+        <div className="subcard" style={{marginTop:0}}>
+          <div className="row" style={{gap:12, alignItems:"center", flexWrap:"wrap"}}>
+            <label style={{display:"flex", alignItems:"center", gap:8}}>
+              <span className="muted">平均</span>
+              <input
+                value={avgPerDay}
+                onChange={(e)=>setAvgPerDay(Number(e.target.value.replace(/[^\d]/g,"") || 0))}
+                inputMode="numeric"
+                style={{width:140, textAlign:"right"}}
+              />
+              <span className="muted">枚 / 日</span>
+            </label>
+            <span className="muted">｜</span>
+            <span>残り日数（今日含む）：<b>{fmt(remainDays)}</b> 日</span>
+          </div>
+
+          <div className="row" style={{marginTop:8, gap:16, flexWrap:"wrap"}}>
+            <div><div className="muted small">いまのコイン</div><b>{fmt(baseCoins)} 枚</b></div>
+            <div><div className="muted small">見込み追加（年末まで）</div><b>{fmt(additional)} 枚</b></div>
+            <div><div className="muted small">12/31 見込み合計</div><b style={{fontSize:18}}>{fmt(projected)} 枚</b></div>
+          </div>
+        </div>
+      </div>
+    </details>
   );
 }

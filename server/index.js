@@ -1,17 +1,24 @@
 // server/index.js
+// Tsumu Coins API (Postgres 優先 / SQLite フォールバック)
+// - JWT 認証（名前 + PIN）
+// - 今日入力（23:59 までは上書き可）/ 過去日の修正（環境変数で制御）
+// - 自分の履歴、直近記録一覧、ランキング（raw/daily/period）
+// - ラインチャート用 series 取得
+// - CORS（GitHub Pages / localhost 許可）+ 軽量メモリキャッシュ
+
 import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import webpush from "web-push";
 
-/* ================= 基本設定 ================= */
+/* ===================== 基本設定 ===================== */
 const app = express();
 app.use(express.json());
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const PORT = process.env.PORT || 3001;
 const TZ = "Asia/Tokyo";
+const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 const DATABASE_URL = process.env.DATABASE_URL || ""; // Render Postgres の接続文字列
 const USE_PG = !!DATABASE_URL;
 const DB_PATH = process.env.DB_PATH || "./coins.db";
@@ -25,7 +32,11 @@ if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 }
 
-/* ================= CORS（全ルート＆OPTIONS） ================= */
+// 過去編集のポリシー（/api/status と PATCH で利用）
+const ALLOW_PAST_EDITS = process.env.ALLOW_PAST_EDITS === "1";
+const PAST_EDIT_MAX_DAYS = parseInt(process.env.PAST_EDIT_MAX_DAYS || "30", 10); // 0=無制限
+
+/* ===================== CORS ===================== */
 const ALLOWLIST = [
   "https://kazuki326.github.io", // GitHub Pages
   "http://localhost:5173",
@@ -36,14 +47,13 @@ const ALLOWLIST = [
 const corsDelegate = (req, cb) => {
   const origin = req.header("Origin") || "";
   const ok =
-    !origin ||
     ALLOWLIST.includes(origin) ||
     origin.includes("localhost") ||
     origin.includes("127.0.0.1");
   cb(null, {
-    origin: ok,
-    credentials: false,
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    origin: ok ? origin : false,
+    credentials: true,
+    methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Timezone"],
     optionsSuccessStatus: 204,
   });
@@ -51,19 +61,24 @@ const corsDelegate = (req, cb) => {
 app.use(cors(corsDelegate));
 app.options("*", cors(corsDelegate));
 
-/* ================= 日付ユーティリティ ================= */
+/* ===================== 日付ユーティリティ ===================== */
 const nowISO = () => new Date().toISOString();
 const jstNow = () => new Date(new Date().toLocaleString("en-US", { timeZone: TZ }));
 const jstDateYMD = (d = new Date()) =>
-  new Date(d.toLocaleString("en-US", { timeZone: TZ }))
-    .toISOString()
-    .slice(0, 10);
+  new Date(d.toLocaleString("en-US", { timeZone: TZ })).toISOString().slice(0, 10);
 
-const addDays = (ymd, n) => {
-  const d = new Date(ymd + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
+const toDate = (ymd) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d));
 };
+const addDays = (ymd, n) => {
+  const dt = toDate(ymd);
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+};
+const daysDiff = (aYmd, bYmd) =>
+  Math.floor((toDate(bYmd) - toDate(aYmd)) / 86_400_000);
+
 const listDates = (startYmd, endYmd) => {
   const out = [];
   let d = startYmd;
@@ -73,18 +88,19 @@ const listDates = (startYmd, endYmd) => {
   }
   return out;
 };
-// 23:59 までは「今日」は暫定。確定済みの最終日はその前日
+// グラフの終端既定値（23:59 確定前は前日を返したい時はこれを利用）
 const lastFinalizedYmd = () => {
-  const now = jstNow();
-  const h = now.getHours(), m = now.getMinutes();
-  if (h < 23 || (h === 23 && m < 59)) return addDays(now.toISOString().slice(0, 10), -1);
-  return now.toISOString().slice(0, 10);
+  const n = jstNow();
+  if (n.getHours() < 23 || (n.getHours() === 23 && n.getMinutes() < 59)) {
+    return addDays(jstDateYMD(n), -1);
+  }
+  return jstDateYMD(n);
 };
-// PG の DATE でも文字列でも YYYY-MM-DD に揃える
+// PG/SQLite の日付を YYYY-MM-DD にそろえる
 const normYMD = (v) =>
   typeof v === "string" ? v.slice(0, 10) : v?.toISOString?.().slice(0, 10);
 
-/* ================= DB 抽象化（PG 優先 / SQLite フォールバック） ================= */
+/* ===================== DB（PG 優先 / SQLite フォールバック） ===================== */
 let db = null;     // better-sqlite3 のインスタンス
 let pgPool = null; // pg.Pool
 
@@ -101,7 +117,7 @@ if (USE_PG) {
       pin_hash TEXT NOT NULL,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_ci ON users (lower(name));
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_name_ci ON users(lower(name));
 
     CREATE TABLE IF NOT EXISTS coin_logs (
       id SERIAL PRIMARY KEY,
@@ -136,7 +152,7 @@ if (USE_PG) {
     ({ default: Database } = await import("better-sqlite3"));
   } catch (e) {
     console.error(
-      "better-sqlite3 が見つかりません。ローカルで SQLite を使う場合は `npm i` で optional を入れるか、DATABASE_URL を設定して Postgres を使ってください。"
+      "better-sqlite3 が見つかりません。ローカルで SQLite を使う場合は `npm i` で依存を入れるか、DATABASE_URL を設定して Postgres を使ってください。"
     );
     process.exit(1);
   }
@@ -183,13 +199,12 @@ if (USE_PG) {
   `);
 }
 
-// ? → $1 変換（PG 用）
+// PG の ? → $1 変換
 const toPg = (sql) => {
   let i = 0;
   return sql.replace(/\?/g, () => `$${++i}`);
 };
-
-// SELECT 1 行
+// SELECT 1行
 const sqlGet = async (sql, params = []) => {
   if (USE_PG) {
     const { rows } = await pgPool.query(toPg(sql), params);
@@ -215,7 +230,7 @@ const sqlRun = async (sql, params = []) => {
   return { changes: info.changes, lastID: info.lastInsertRowid };
 };
 
-/* ================= 簡易メモリキャッシュ（冷え対策/軽負荷） ================= */
+/* ===================== 軽量キャッシュ ===================== */
 const CACHE = new Map(); // key -> { at, ttl, data }
 const getCache = (key) => {
   const e = CACHE.get(key);
@@ -228,7 +243,7 @@ const setCache = (key, data, ttlMs = 60_000) => {
 };
 const clearCache = () => CACHE.clear();
 
-/* ================= 認証 ================= */
+/* ===================== 認証 ===================== */
 const issueToken = (user) =>
   jwt.sign({ uid: user.id, name: user.name }, JWT_SECRET, { expiresIn: "30d" });
 
@@ -237,19 +252,19 @@ const auth = (req, res, next) => {
   const token = h.startsWith("Bearer ") ? h.slice(7) : null;
   try {
     const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload; // { uid, name }
+    req.user = payload;
     next();
   } catch {
     res.status(401).json({ error: "unauthorized" });
   }
 };
 
-/* ================= API ================= */
+/* ===================== API ===================== */
 
 // 健康チェック
 app.get("/", (_req, res) => res.json({ ok: true }));
 
-// ステータス（今日・締切・ボード基準日）
+// ステータス（今日/締切、過去編集ポリシー）
 app.get("/api/status", (_req, res) => {
   const today = jstDateYMD();
   const now = jstNow();
@@ -257,7 +272,9 @@ app.get("/api/status", (_req, res) => {
   res.json({
     today_ymd: today,
     canEditToday,
-    board_date_ymd: canEditToday ? today : today, // 表示用。運用に合わせて調整可
+    board_date_ymd: today,
+    allowPastEdits: ALLOW_PAST_EDITS,
+    pastEditMaxDays: PAST_EDIT_MAX_DAYS,
   });
 });
 
@@ -280,12 +297,13 @@ app.post("/api/register", async (req, res) => {
         "INSERT INTO users(name, pin_hash, created_at) VALUES (?, ?, ?)",
         [name, pin_hash, nowISO()]
       );
-      const user = await sqlGet("SELECT id, name FROM users WHERE id = ?", [r.lastID]);
+      const user = await sqlGet("SELECT id, name FROM users WHERE id=?", [r.lastID]);
       res.json({ token: issueToken(user), user });
     }
   } catch (e) {
     const msg = String(e).toLowerCase();
-    if (msg.includes("unique")) return res.status(409).json({ error: "name already taken" });
+    if (msg.includes("unique"))
+      return res.status(409).json({ error: "name already taken" });
     console.error(e);
     res.status(500).json({ error: "server error" });
   }
@@ -297,7 +315,8 @@ app.post("/api/login", async (req, res) => {
   const pin = String(req.body?.pin || "").trim();
   const user = await sqlGet("SELECT * FROM users WHERE lower(name)=lower(?)", [name]);
   if (!user) return res.status(404).json({ error: "user not found" });
-  if (!bcrypt.compareSync(pin, user.pin_hash)) return res.status(401).json({ error: "invalid pin" });
+  if (!bcrypt.compareSync(pin, user.pin_hash))
+    return res.status(401).json({ error: "invalid pin" });
   res.json({ token: issueToken(user), user: { id: user.id, name: user.name } });
 });
 
@@ -341,9 +360,7 @@ app.post("/api/coins", auth, async (req, res) => {
       }
     }
 
-    // キャッシュ無効化（ランキングに即反映）
-    clearCache();
-
+    clearCache(); // ランキングに即反映
     const prev = await sqlGet(
       "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
       [req.user.uid, date_ymd]
@@ -362,7 +379,6 @@ app.get("/api/coins", auth, async (req, res) => {
     "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
     [req.user.uid, days]
   );
-  // diff は「直近記録とそのひとつ後ろ」の単純差。最古行の diff は 0 にする
   const normed = rows.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: r.coins }));
   const withDiff = normed.map((r, i) => ({
     ...r,
@@ -371,6 +387,74 @@ app.get("/api/coins", auth, async (req, res) => {
   res.json(withDiff);
 });
 
+// 直近の自分の記録（修正用の一覧）
+app.get("/api/my_latest", auth, async (req, res) => {
+  const limit = Math.max(1, Math.min(30, Number(req.query.limit || 7)));
+  try {
+    const rows = await sqlAll(
+      "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
+      [req.user.uid, limit]
+    );
+    res.json(rows.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: Number(r.coins) || 0 })));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// 記録の修正（今日のみ or 環境変数で過去も許可）
+app.patch("/api/coins/:date", auth, async (req, res) => {
+  const date_ymd = String(req.params.date || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date_ymd))
+    return res.status(400).json({ error: "invalid date" });
+
+  const coins = Number(req.body?.coins);
+  if (!Number.isInteger(coins) || coins < 0)
+    return res.status(400).json({ error: "coins must be non-negative integer" });
+
+  const today = jstDateYMD();
+  const now = jstNow();
+  const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
+
+  if (date_ymd === today) {
+    if (!canEditToday) return res.status(403).json({ error: "today is already finalized" });
+  } else {
+    if (!ALLOW_PAST_EDITS) return res.status(403).json({ error: "editing past days is locked" });
+    const diff = Math.abs(daysDiff(date_ymd, today));
+    if (PAST_EDIT_MAX_DAYS > 0 && diff > PAST_EDIT_MAX_DAYS) {
+      return res
+        .status(403)
+        .json({ error: `only past ${PAST_EDIT_MAX_DAYS} days can be edited` });
+    }
+  }
+
+  try {
+    const exist = await sqlGet(
+      "SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?",
+      [req.user.uid, date_ymd]
+    );
+    if (!exist) return res.status(404).json({ error: "record not found for that date" });
+
+    if (USE_PG) {
+      await sqlRun("UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?", [
+        coins,
+        exist.id,
+      ]);
+    } else {
+      await sqlRun("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?", [
+        coins,
+        nowISO(),
+        exist.id,
+      ]);
+    }
+
+    clearCache();
+    res.json({ date_ymd, coins });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
 
 /* ============= ランキング（数値）：/api/board =============
    クエリ:
@@ -380,8 +464,8 @@ app.get("/api/coins", auth, async (req, res) => {
    定義:
      raw    = 指定日までの最新値
      daily  = 指定日の前日比
-     period = 期間内「記録日の前日比（diff）」の総和
-              └ 期間最初の記録の diff は「直前の記録（期間外でも可）」との差
+     period = 期間内に“存在する記録同士”の前日差(diff)を合計
+              └ 期間開始日前の基準値は使わない（最初の1件は差分0）
 ============================================================= */
 app.get("/api/board", async (req, res) => {
   const date = (req.query.date || jstDateYMD()).slice(0, 10);
@@ -398,7 +482,7 @@ app.get("/api/board", async (req, res) => {
     const board = [];
 
     for (const u of users) {
-      // 指定日までの最新値（raw/daily 用）
+      // 指定日までの最新値と、その直前
       const lastOnOrBefore = await sqlGet(
         "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd DESC LIMIT 1",
         [u.id, date]
@@ -417,25 +501,19 @@ app.get("/api/board", async (req, res) => {
         const vPrev = prevBeforeDate?.coins || 0;
         value = vLast - vPrev;
       } else {
-        // === period: 期間内“前日比(diff)”の総和 ===
-        // 1) 窓開始日前の直近記録（期間最初の diff 計算の基準）
-        const beforeStart = await sqlGet(
-          "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
-          [u.id, startDate]
-        );
-        // 2) 期間内の記録行（昇順）
+        // period: 期間内“に存在する記録同士”の差分のみ合計（= 履歴画面のやり方）
         const rows = await sqlAll(
           "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd >= ? AND date_ymd <= ? ORDER BY date_ymd ASC",
           [u.id, startDate, date]
         );
 
-        // 3) 期間内の「記録日の前日比（＝直前の記録との差）」を合計
-        let last = beforeStart?.coins || 0;
+        let prev = null; // 期間内の直前レコード（期間外は見ない）
         let sum = 0;
         for (const r of rows) {
-          const diff = (r.coins || 0) - last;
-          sum += diff;
-          last = r.coins || 0;
+          if (prev !== null) {
+            sum += (Number(r.coins) || 0) - (Number(prev.coins) || 0);
+          }
+          prev = r;
         }
         value = sum;
       }
@@ -445,7 +523,7 @@ app.get("/api/board", async (req, res) => {
 
     board.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
     const payload = { date_ymd: date, mode, periodDays, board };
-    setCache(cacheKey, payload, 60_000); // 60秒キャッシュ
+    setCache(cacheKey, payload, 60_000);
     res.json(payload);
   } catch (e) {
     console.error(e);
@@ -462,13 +540,13 @@ app.get("/api/board", async (req, res) => {
      top=5（上位N名）
      date=YYYY-MM-DD（終端日。省略時は lastFinalizedYmd()）
    ロジック:
-     ・valuesRaw   = その日までの最新値（キャリー）
-     ・valuesDaily = 前日差
-     ・valuesPeriod= 前日差のローリング合計（窓幅 periodDays）
+     valuesRaw   = その日までの最新値（キャリー）
+     valuesDaily = 前日差
+     valuesPeriod= 前日差のローリング合計（窓幅 periodDays）
 ======================================================================= */
 app.get("/api/board_series", async (req, res) => {
   try {
-    const mode = (req.query.mode || "daily").toLowerCase(); // raw|daily|period
+    const mode = (req.query.mode || "daily").toLowerCase();
     const periodDays = Math.max(1, Number(req.query.periodDays || 7));
     const days = Math.max(1, Math.min(90, Number(req.query.days || 14)));
     const top = Math.max(1, Math.min(50, Number(req.query.top || 5)));
@@ -484,13 +562,15 @@ app.get("/api/board_series", async (req, res) => {
     const seriesAll = [];
 
     for (const u of users) {
-      const logs = await sqlAll(
+      const logsAsc = await sqlAll(
         "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd ASC",
         [u.id, endYmd]
-      ).then((rows) => rows.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: r.coins })));
+      );
+      const logs = logsAsc.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: r.coins }));
 
       // その日までの最新値（キャリー）
-      let idx = 0, last = 0;
+      let idx = 0,
+        last = 0;
       const valuesRaw = dates.map((d) => {
         while (idx < logs.length && logs[idx].date_ymd <= d) {
           last = logs[idx].coins;
@@ -530,7 +610,7 @@ app.get("/api/board_series", async (req, res) => {
       top,
       series: topSeries,
     };
-    setCache(cacheKey, payload, 60_000); // 60秒キャッシュ
+    setCache(cacheKey, payload, 60_000);
     res.json(payload);
   } catch (e) {
     console.error(e);
@@ -739,7 +819,9 @@ app.post("/api/notifications/test", auth, async (req, res) => {
   }
 });
 
-/* ================= 起動 ================= */
+/* ===================== 起動 ===================== */
 app.listen(PORT, () =>
-  console.log(`API server listening on :${PORT} (DB=${USE_PG ? "Postgres" : "SQLite"})`)
+  console.log(
+    `API server listening on :${PORT} (DB=${USE_PG ? "Postgres" : "SQLite"})`
+  )
 );
