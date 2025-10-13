@@ -68,4 +68,35 @@ export const api = {
     if (date) p.set("date", date);
     return req(`/api/board_series?${p.toString()}`);
   },
+
+  // 通知機能
+  getVapidPublicKey() {
+    return req("/api/notifications/vapid-public-key");
+  },
+  subscribeNotifications(subscription) {
+    return req("/api/notifications/subscribe", {
+      method: "POST",
+      body: JSON.stringify(subscription),
+    });
+  },
+  unsubscribeNotifications(endpoint) {
+    return req("/api/notifications/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify({ endpoint }),
+    });
+  },
+  getNotificationSettings() {
+    return req("/api/notifications/settings");
+  },
+  updateNotificationSettings(settings) {
+    return req("/api/notifications/settings", {
+      method: "POST",
+      body: JSON.stringify(settings),
+    });
+  },
+  testNotification() {
+    return req("/api/notifications/test", {
+      method: "POST",
+    });
+  },
 };

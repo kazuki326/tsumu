@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import webpush from "web-push";
 
 /* ================= 基本設定 ================= */
 const app = express();
@@ -14,6 +15,15 @@ const TZ = "Asia/Tokyo";
 const DATABASE_URL = process.env.DATABASE_URL || ""; // Render Postgres の接続文字列
 const USE_PG = !!DATABASE_URL;
 const DB_PATH = process.env.DB_PATH || "./coins.db";
+
+// VAPID設定
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:noreply@tsumu-coins.app";
+
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 /* ================= CORS（全ルート＆OPTIONS） ================= */
 const ALLOWLIST = [
@@ -101,6 +111,24 @@ if (USE_PG) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE(user_id, date_ymd)
     );
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE(user_id, endpoint)
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      daily_reminder BOOLEAN NOT NULL DEFAULT false,
+      reminder_time TEXT NOT NULL DEFAULT '20:00',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
 } else {
   let Database;
@@ -130,6 +158,26 @@ if (USE_PG) {
       coins INTEGER NOT NULL,
       created_at TEXT NOT NULL,
       UNIQUE(user_id, date_ymd),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      endpoint TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(user_id, endpoint),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      user_id INTEGER PRIMARY KEY,
+      daily_reminder INTEGER NOT NULL DEFAULT 0,
+      reminder_time TEXT NOT NULL DEFAULT '20:00',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
@@ -486,6 +534,207 @@ app.get("/api/board_series", async (req, res) => {
     res.json(payload);
   } catch (e) {
     console.error(e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+/* ================= 通知機能 API ================= */
+
+// VAPID公開鍵取得
+app.get("/api/notifications/vapid-public-key", (_req, res) => {
+  if (!VAPID_PUBLIC_KEY) {
+    return res.status(503).json({ error: "VAPID not configured" });
+  }
+  res.json({ publicKey: VAPID_PUBLIC_KEY });
+});
+
+// プッシュ通知購読登録
+app.post("/api/notifications/subscribe", auth, async (req, res) => {
+  try {
+    const { endpoint, keys } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: "invalid subscription data" });
+    }
+
+    // 既存の購読を削除（同じendpointがあれば更新）
+    await sqlRun("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?", [
+      req.user.uid,
+      endpoint,
+    ]);
+
+    // 新規登録
+    if (USE_PG) {
+      await sqlRun(
+        "INSERT INTO push_subscriptions(user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, now())",
+        [req.user.uid, endpoint, keys.p256dh, keys.auth]
+      );
+    } else {
+      await sqlRun(
+        "INSERT INTO push_subscriptions(user_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?)",
+        [req.user.uid, endpoint, keys.p256dh, keys.auth, nowISO()]
+      );
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[subscribe]", e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// プッシュ通知購読解除
+app.post("/api/notifications/unsubscribe", auth, async (req, res) => {
+  try {
+    const { endpoint } = req.body;
+    if (!endpoint) {
+      return res.status(400).json({ error: "endpoint required" });
+    }
+
+    await sqlRun("DELETE FROM push_subscriptions WHERE user_id=? AND endpoint=?", [
+      req.user.uid,
+      endpoint,
+    ]);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unsubscribe]", e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// 通知設定取得
+app.get("/api/notifications/settings", auth, async (req, res) => {
+  try {
+    let settings = await sqlGet(
+      "SELECT daily_reminder, reminder_time FROM notification_settings WHERE user_id=?",
+      [req.user.uid]
+    );
+
+    if (!settings) {
+      // デフォルト値を返す
+      settings = {
+        daily_reminder: USE_PG ? false : 0,
+        reminder_time: "20:00",
+      };
+    }
+
+    // SQLiteの場合は0/1をbooleanに変換
+    const daily_reminder = USE_PG ? !!settings.daily_reminder : !!settings.daily_reminder;
+
+    res.json({
+      daily_reminder,
+      reminder_time: settings.reminder_time,
+    });
+  } catch (e) {
+    console.error("[get settings]", e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// 通知設定更新
+app.post("/api/notifications/settings", auth, async (req, res) => {
+  try {
+    const { daily_reminder, reminder_time } = req.body;
+
+    // バリデーション
+    if (typeof daily_reminder !== "boolean") {
+      return res.status(400).json({ error: "daily_reminder must be boolean" });
+    }
+    if (typeof reminder_time !== "string" || !/^\d{2}:\d{2}$/.test(reminder_time)) {
+      return res.status(400).json({ error: "reminder_time must be HH:mm format" });
+    }
+
+    const existing = await sqlGet(
+      "SELECT user_id FROM notification_settings WHERE user_id=?",
+      [req.user.uid]
+    );
+
+    if (existing) {
+      // 更新
+      if (USE_PG) {
+        await sqlRun(
+          "UPDATE notification_settings SET daily_reminder=?, reminder_time=?, updated_at=now() WHERE user_id=?",
+          [daily_reminder, reminder_time, req.user.uid]
+        );
+      } else {
+        await sqlRun(
+          "UPDATE notification_settings SET daily_reminder=?, reminder_time=?, updated_at=? WHERE user_id=?",
+          [daily_reminder ? 1 : 0, reminder_time, nowISO(), req.user.uid]
+        );
+      }
+    } else {
+      // 新規作成
+      if (USE_PG) {
+        await sqlRun(
+          "INSERT INTO notification_settings(user_id, daily_reminder, reminder_time, created_at, updated_at) VALUES (?, ?, ?, now(), now())",
+          [req.user.uid, daily_reminder, reminder_time]
+        );
+      } else {
+        const now = nowISO();
+        await sqlRun(
+          "INSERT INTO notification_settings(user_id, daily_reminder, reminder_time, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+          [req.user.uid, daily_reminder ? 1 : 0, reminder_time, now, now]
+        );
+      }
+    }
+
+    res.json({ success: true, daily_reminder, reminder_time });
+  } catch (e) {
+    console.error("[update settings]", e);
+    res.status(500).json({ error: "server error" });
+  }
+});
+
+// テスト通知送信（開発用）
+app.post("/api/notifications/test", auth, async (req, res) => {
+  try {
+    const subscriptions = await sqlAll(
+      "SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id=?",
+      [req.user.uid]
+    );
+
+    if (subscriptions.length === 0) {
+      return res.status(404).json({ error: "no subscriptions found" });
+    }
+
+    const payload = JSON.stringify({
+      title: "テスト通知",
+      body: "これはテスト通知です。通知機能が正常に動作しています！",
+      icon: "/icon-192.png",
+      badge: "/badge-72.png",
+      tag: "test-notification",
+      url: "/",
+    });
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const sub of subscriptions) {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: {
+              p256dh: sub.p256dh,
+              auth: sub.auth,
+            },
+          },
+          payload
+        );
+        sent++;
+      } catch (e) {
+        console.error("[test notification failed]", e);
+        failed++;
+        // 410 Gone = 購読が無効になっている場合は削除
+        if (e.statusCode === 410) {
+          await sqlRun("DELETE FROM push_subscriptions WHERE endpoint=?", [sub.endpoint]);
+        }
+      }
+    }
+
+    res.json({ sent, failed, total: subscriptions.length });
+  } catch (e) {
+    console.error("[test notification]", e);
     res.status(500).json({ error: "server error" });
   }
 });

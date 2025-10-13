@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import "./App.css";
+import NotificationSettings from "./NotificationSettings";
 
 /* ========== ルーティング（ハッシュ） ========== */
 const useHashRoute = () => {
@@ -145,7 +146,7 @@ export default function App() {
 
   // ルーティング遷移
   useEffect(() => {
-    if (!loggedIn && route === "/me") push("/");
+    if (!loggedIn && (route === "/me" || route === "/notifications")) push("/");
     if (loggedIn && (route === "/" || route === "/signup")) push("/me");
   }, [loggedIn, route]);
 
@@ -203,6 +204,7 @@ export default function App() {
             />
             <div className="row">
               <button disabled={busy || coins === "" || !canEdit} onClick={submitCoins}>保存</button>
+              <button className="ghost" disabled={busy} onClick={()=>push("/notifications")}>通知設定</button>
               <button className="ghost" disabled={busy} onClick={()=>{
                 localStorage.removeItem("token"); setToken(""); setFlash({ type:"", text:"" });
                 setCoins(""); window.location.hash="/";
@@ -237,6 +239,15 @@ export default function App() {
               />
             )}
           </div>
+        </>
+      )}
+
+      {route === "/notifications" && loggedIn && (
+        <>
+          <div style={{ marginBottom: 16 }}>
+            <button className="ghost" onClick={()=>push("/me")}>← マイページに戻る</button>
+          </div>
+          <NotificationSettings />
         </>
       )}
 
