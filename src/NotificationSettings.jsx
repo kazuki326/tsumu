@@ -247,13 +247,29 @@ export default function NotificationSettings() {
         {settings.daily_reminder && (
           <div className="time-input-wrapper">
             <label>通知時刻</label>
-            <input
-              type="time"
+            <select
               value={settings.reminder_time}
               onChange={(e) =>
                 setSettings({ ...settings, reminder_time: e.target.value })
               }
-            />
+              style={{
+                width: '100%',
+                maxWidth: '200px',
+                padding: '10px',
+                fontSize: '16px',
+                borderRadius: '12px',
+                border: '1px solid #e6e8f0',
+                margin: 0
+              }}
+            >
+              <option value="18:00">18:00 (午後6時)</option>
+              <option value="19:00">19:00 (午後7時)</option>
+              <option value="20:00">20:00 (午後8時)</option>
+              <option value="21:00">21:00 (午後9時)</option>
+              <option value="22:00">22:00 (午後10時)</option>
+              <option value="23:00">23:00 (午後11時)</option>
+              <option value="00:00">24:00 (深夜0時)</option>
+            </select>
           </div>
         )}
 

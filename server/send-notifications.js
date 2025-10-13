@@ -104,9 +104,11 @@ async function sendDailyReminders() {
 
   for (const setting of settings) {
     const reminderTime = setting.reminder_time;
+    const currentHour = currentTime.split(':')[0];
+    const reminderHour = reminderTime.split(':')[0];
 
-    // 時刻が一致するかチェック（±5分の範囲）
-    if (!isWithinTimeWindow(currentTime, reminderTime, 5)) {
+    // 時刻が完全一致するかチェック（時のみ）
+    if (currentHour !== reminderHour) {
       continue;
     }
 
