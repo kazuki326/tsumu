@@ -78,27 +78,33 @@ export const api = {
   subscribeNotifications(subscription) {
     return req("/api/notifications/subscribe", {
       method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(subscription),
     });
   },
   unsubscribeNotifications(endpoint) {
     return req("/api/notifications/unsubscribe", {
       method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ endpoint }),
     });
   },
   getNotificationSettings() {
-    return req("/api/notifications/settings");
+    return req("/api/notifications/settings", {
+      headers: { ...authHeader() }
+    });
   },
   updateNotificationSettings(settings) {
     return req("/api/notifications/settings", {
       method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify(settings),
     });
   },
   testNotification() {
     return req("/api/notifications/test", {
       method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeader() },
     });
   }
 };
