@@ -175,15 +175,9 @@ export default function NotificationSettings() {
           お使いのブラウザはプッシュ通知に対応していません。
         </p>
         {isIOS && !isInStandaloneMode && (
-          <div style={{
-            marginTop: 16,
-            padding: 12,
-            background: '#fef3c7',
-            borderRadius: 8,
-            fontSize: 14
-          }}>
+          <div className="ios-notice">
             <strong>📱 iPhoneでプッシュ通知を使うには：</strong>
-            <ol style={{ marginTop: 8, marginBottom: 0, paddingLeft: 20 }}>
+            <ol>
               <li>Safari の共有ボタン（↑）をタップ</li>
               <li>「ホーム画面に追加」を選択</li>
               <li>追加したアプリアイコンから起動</li>
@@ -202,23 +196,22 @@ export default function NotificationSettings() {
     <div className="card">
       <h2>通知設定</h2>
 
-      <div style={{ marginBottom: 16 }}>
+      {/* プッシュ通知セクション */}
+      <div className="notification-section">
         <h3>プッシュ通知</h3>
-        <p className="muted" style={{ fontSize: 14, marginBottom: 8 }}>
-          ステータス: {subscription ? "有効" : "無効"} | 権限:{" "}
-          {permission === "granted"
-            ? "許可済み"
-            : permission === "denied"
-            ? "拒否"
-            : "未設定"}
-        </p>
+        <div className="notification-status">
+          <span>ステータス: <strong>{subscription ? "有効" : "無効"}</strong></span>
+          <span>権限: <strong>
+            {permission === "granted" ? "許可済み" : permission === "denied" ? "拒否" : "未設定"}
+          </strong></span>
+        </div>
 
         {!subscription ? (
           <button disabled={loading} onClick={handleSubscribe}>
             プッシュ通知を有効にする
           </button>
         ) : (
-          <div className="row">
+          <div className="notification-buttons">
             <button disabled={loading} onClick={handleTestNotification}>
               テスト通知を送信
             </button>
@@ -233,32 +226,33 @@ export default function NotificationSettings() {
         )}
       </div>
 
-      <div style={{ marginBottom: 16 }}>
+      {/* 通知タイミングセクション */}
+      <div className="notification-section">
         <h3>通知タイミング</h3>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <input
-            type="checkbox"
-            checked={settings.daily_reminder}
-            onChange={(e) =>
-              setSettings({ ...settings, daily_reminder: e.target.checked })
-            }
-          />
-          <span>日次リマインダーを受け取る</span>
-        </label>
+        <div className="toggle-label">
+          <span className="toggle-label-text">日次リマインダーを受け取る</span>
+          <label className="toggle-switch">
+            <input
+              type="checkbox"
+              checked={settings.daily_reminder}
+              onChange={(e) =>
+                setSettings({ ...settings, daily_reminder: e.target.checked })
+              }
+            />
+            <span className="toggle-slider"></span>
+          </label>
+        </div>
 
         {settings.daily_reminder && (
-          <div style={{ marginLeft: 24 }}>
-            <label style={{ display: "block", marginBottom: 4 }}>
-              通知時刻 (HH:mm形式)
-            </label>
+          <div className="time-input-wrapper">
+            <label>通知時刻</label>
             <input
               type="time"
               value={settings.reminder_time}
               onChange={(e) =>
                 setSettings({ ...settings, reminder_time: e.target.value })
               }
-              style={{ maxWidth: 150 }}
             />
           </div>
         )}
@@ -266,17 +260,16 @@ export default function NotificationSettings() {
         <button
           disabled={loading}
           onClick={handleUpdateSettings}
-          style={{ marginTop: 8 }}
+          style={{ marginTop: 12, width: '100%' }}
         >
           設定を保存
         </button>
       </div>
 
-      <p className="muted" style={{ fontSize: 12 }}>
-        通知: 日次リマインダーで「今日のコインを記録しましょう」と通知されます。
+      <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
+        💡 日次リマインダーで「今日のコインを記録しましょう」と通知されます。
         <br />
-        iOSの場合: ホーム画面に追加（PWA）してから通知を有効にしてください（iOS
-        16.4+）
+        📱 iOSの場合: ホーム画面に追加（PWA）してから通知を有効にしてください（iOS 16.4+）
       </p>
     </div>
   );

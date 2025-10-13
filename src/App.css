@@ -176,3 +176,162 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
 
 /* 任意: ランキングの数値を右寄せ＆太字に */
 .rank-value { text-align: right; font-weight: 700; }
+
+/* トグルスイッチ */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e1;
+  transition: .3s;
+  border-radius: 28px;
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(22px);
+}
+
+.toggle-switch input:disabled + .toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 通知設定のレイアウト（スマホ対応） */
+.notification-section {
+  margin-bottom: 20px;
+}
+
+.notification-section h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.notification-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.toggle-label-text {
+  flex: 1;
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.time-input-wrapper {
+  margin-left: 0;
+  margin-top: 8px;
+  padding: 12px;
+  background: #f9fafb;
+  border-radius: 10px;
+}
+
+.time-input-wrapper label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.time-input-wrapper input[type="time"] {
+  width: 100%;
+  max-width: 200px;
+  margin: 0;
+  padding: 10px;
+  font-size: 16px;
+}
+
+.notification-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.notification-buttons button {
+  width: 100%;
+}
+
+@media (min-width: 480px) {
+  .notification-buttons {
+    flex-direction: row;
+  }
+
+  .notification-buttons button {
+    width: auto;
+    flex: 1;
+  }
+
+  .notification-status {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
+.ios-notice {
+  margin-top: 16px;
+  padding: 12px;
+  background: #fef3c7;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.ios-notice strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.ios-notice ol {
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.ios-notice ol li {
+  margin-bottom: 4px;
+}
