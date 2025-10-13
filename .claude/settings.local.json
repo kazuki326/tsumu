@@ -4,7 +4,10 @@
       "WebFetch(domain:tsumu-api.onrender.com)",
       "Bash(git log:*)",
       "Bash(gh repo view:*)",
-      "WebFetch(domain:tsumu.onrender.com)"
+      "WebFetch(domain:tsumu.onrender.com)",
+      "Bash(npm install:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

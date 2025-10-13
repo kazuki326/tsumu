@@ -30,7 +30,8 @@ export default function NotificationSettings() {
     if (!supported) return;
     (async () => {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js");
+        const swPath = import.meta.env.BASE_URL + "sw.js";
+        const registration = await navigator.serviceWorker.register(swPath);
         console.log("[SW] registered", registration);
 
         // 既存の購読を確認
