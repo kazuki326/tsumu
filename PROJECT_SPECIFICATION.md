@@ -7,7 +7,7 @@ TSUMU COINSは、日々のコイン数（ポイントや数値）を記録・管
 **プロジェクト名**: tsumu-coins
 **バージョン**: 1.0.0
 **作成日**: 2025年（推定）
-**最終更新**: ver6.5.5
+**最終更新**: ver6.7.4 (プッシュ通知機能完成)
 
 ## 技術スタック
 
@@ -37,25 +37,40 @@ TSUMU COINSは、日々のコイン数（ポイントや数値）を記録・管
 
 ```
 tsumu/
-├── src/                    # フロントエンドソースコード
-│   ├── App.jsx            # メインアプリケーションコンポーネント
-│   ├── App.css            # メインスタイルシート
-│   ├── api.js             # APIクライアント
-│   ├── main.jsx           # エントリーポイント
-│   ├── index.css          # グローバルスタイル
-│   └── assets/            # 静的アセット
-├── server/                 # バックエンドソースコード
-│   ├── index.js           # APIサーバーメインファイル
-│   ├── package.json       # サーバー依存関係
-│   ├── coins.db           # SQLiteデータベース（開発用）
-│   └── .env.example       # 環境変数テンプレート
-├── public/                 # 静的ファイル
-├── package.json            # フロントエンド依存関係
-├── vite.config.js          # Vite設定
-├── render.yaml             # Renderデプロイ設定
-├── index.html              # HTMLテンプレート
-├── coins.db                # ルートのSQLiteデータベース
-└── README.md               # プロジェクトREADME
+├── .github/
+│   └── workflows/
+│       ├── pages.yml                    # GitHub Pagesデプロイ
+│       └── send-notifications.yml       # プッシュ通知定期実行
+├── src/                                  # フロントエンドソースコード
+│   ├── App.jsx                          # メインアプリケーションコンポーネント
+│   ├── App.css                          # メインスタイルシート
+│   ├── api.js                           # APIクライアント
+│   ├── main.jsx                         # エントリーポイント
+│   ├── index.css                        # グローバルスタイル
+│   ├── NotificationSettings.jsx         # 通知設定コンポーネント
+│   └── assets/                          # 静的アセット
+├── server/                               # バックエンドソースコード
+│   ├── index.js                         # APIサーバーメインファイル
+│   ├── send-notifications.js            # 通知バッチ処理スクリプト
+│   ├── generate-vapid-keys.js           # VAPID鍵生成ツール
+│   ├── package.json                     # サーバー依存関係
+│   ├── coins.db                         # SQLiteデータベース（開発用）
+│   ├── CRON_SETUP.md                    # Cron設定ガイド
+│   └── .env.example                     # 環境変数テンプレート
+├── public/                               # 静的ファイル
+│   ├── sw.js                            # Service Worker（通知処理）
+│   ├── manifest.json                    # PWAマニフェスト
+│   ├── icon-192.png                     # 通知アイコン（192x192）
+│   ├── icon-512.png                     # 通知アイコン（512x512）
+│   └── badge-72.png                     # 通知バッジ（72x72）
+├── package.json                          # フロントエンド依存関係
+├── vite.config.js                        # Vite設定
+├── render.yaml                           # Renderデプロイ設定
+├── index.html                            # HTMLテンプレート
+├── coins.db                              # ルートのSQLiteデータベース
+├── PROJECT_SPECIFICATION.md              # プロジェクト仕様書（本ファイル）
+├── NOTIFICATION_SETUP.md                 # 通知機能セットアップガイド
+└── README.md                             # プロジェクトREADME
 ```
 
 ## 主要機能
@@ -66,14 +81,25 @@ tsumu/
 - **トークン管理**: JWT形式、有効期限30日
 - **セキュリティ**: bcryptjsによるPINハッシュ化
 
-### 2. プッシュ通知機能（NEW）
-- **Web Push API**: Service Workerを使用したブラウザネイティブ通知
+### 2. プッシュ通知機能
+- **Web Push API**: Service Worker (`public/sw.js`) を使用したブラウザネイティブ通知
 - **日次リマインダー**: ユーザーが指定した時刻に「今日のコインを記録しましょう」と通知
-- **通知時刻カスタマイズ**: HH:mm形式で任意の時刻を設定可能
+- **通知時刻カスタマイズ**: 18:00〜24:00の1時間単位で選択可能
+  - 選択肢: 18:00, 19:00, 20:00, 21:00, 22:00, 23:00, 24:00 (深夜0時)
+- **スマート通知ロジック**:
+  - すでにその日のコインを記録している場合は通知をスキップ
+  - 設定時刻（時）と実行時刻（時）が一致した場合のみ送信
+- **GitHub Actions自動実行**:
+  - 毎日18:00〜24:00（JST）の毎時0分に自動実行
+  - `cron: '0 9-15 * * *'` (UTC 9:00-15:00 = JST 18:00-24:00)
+  - 手動実行（workflow_dispatch）にも対応
 - **プッシュ購読管理**: 通知の有効化/無効化
-- **テスト通知**: 設定確認用のテスト通知送信機能
+- **テスト通知**: 設定確認用のテスト通知送信機能（マニュアル実行）
 - **マルチデバイス対応**: 複数デバイスでの購読サポート
 - **iOS対応**: PWA（ホーム画面追加）経由で利用可能（iOS 16.4+）
+- **エラーハンドリング**:
+  - 410 Gone（購読無効）を検知して自動的にDBから削除
+  - 詳細なログ出力で問題追跡が容易
 
 ### 3. コイン記録
 - **日次記録**: 毎日のコイン数を記録（0以上の整数）
@@ -274,8 +300,20 @@ npm run preview      # ビルド結果プレビュー
 ### バックエンド
 ```bash
 npm run dev:api            # サーバー起動（watch モード）
-npm run send-notifications # 通知バッチ処理を手動実行
+npm run send-notifications # 通知バッチ処理を手動実行（cron/GitHub Actions用）
 ```
+
+### 通知バッチ処理
+```bash
+cd server
+node send-notifications.js  # 通知送信バッチを手動実行（デバッグ用）
+```
+
+**GitHub Actionsでの自動実行**:
+- リポジトリ: kazuki326/tsumu
+- ワークフロー: `.github/workflows/send-notifications.yml`
+- スケジュール: 毎日 18:00〜24:00 (JST) の毎時0分
+- 手動実行: GitHub Actions UIから「Run workflow」で即座に実行可能
 
 ### 同時起動
 ```bash
@@ -308,11 +346,19 @@ node generate-vapid-keys.js  # VAPID鍵ペアを生成（初回のみ）
 - プレースホルダーの違いを吸収（`?` → `$1`変換）
 
 ### 4. CORS設定
-- 許可オリジン: GitHub Pages、localhost各種
+- 許可オリジン: `https://kazuki326.github.io`、localhost各種
 - 動的オリジンチェック
 - プリフライトリクエスト対応
 
-### 5. セキュリティ
+### 5. GitHub Actions による通知配信
+- **実行環境**: GitHub Actions (ubuntu-latest)
+- **スケジュール**: cron式で定期実行（18:00-24:00 JST）
+- **データソース**: PostgreSQL（Render）に直接接続
+- **送信方法**: `web-push` ライブラリでブラウザのプッシュサービスに直接送信
+- **Renderサーバー不要**: GitHub ActionsがDBとプッシュサービスに直接アクセスするため、RenderのExpressサーバーは経由しない
+- **スリープ影響なし**: Renderの無料プランのスリープタイムは通知配信に影響しない
+
+### 6. セキュリティ
 - PINは最低4桁、bcryptでハッシュ化
 - JWT有効期限30日
 - 大文字小文字を区別しないユーザー名検索（UNIQUE制約）
@@ -368,4 +414,66 @@ Private Project
 ---
 
 **生成日**: 2025-10-13
+**最終更新日**: 2025-10-14 (プッシュ通知機能完成)
 **このドキュメントは**: プロジェクトの全体像を把握し、AIエージェントや新規開発者が効率的に開発できるように作成されました。
+
+## 通知機能の動作フロー
+
+### 初回セットアップ
+1. ユーザーがアプリにログイン
+2. 「マイページ」→「通知設定」へ移動
+3. 「プッシュ通知を有効にする」をクリック
+4. ブラウザの通知許可ダイアログで「許可」
+5. Service Workerが登録され、プッシュ購読が作成される
+6. 購読情報（endpoint, p256dh, auth）がサーバーのDBに保存される
+
+### 通知設定
+1. 「日次リマインダーを受け取る」をON
+2. 通知時刻を選択（18:00〜24:00）
+3. 「設定を保存」で`notification_settings`テーブルに保存
+
+### 定時通知の流れ
+1. **GitHub Actions 実行** (毎時0分)
+   ```
+   UTC 9:00 (JST 18:00) → 実行
+   UTC 10:00 (JST 19:00) → 実行
+   ...
+   UTC 15:00 (JST 24:00) → 実行
+   ```
+
+2. **通知バッチ処理** (`send-notifications.js`)
+   ```
+   - 現在時刻を取得（例: 20:15）
+   - notification_settings から daily_reminder=true のユーザーを取得
+   - 各ユーザーについて:
+     a. reminder_time の「時」と現在時刻の「時」を比較
+        （例: reminder_time=20:00 と 現在=20:15 → 「20」時で一致）
+     b. 今日すでにコインを記録しているかチェック → 記録済みならスキップ
+     c. push_subscriptions から購読情報を取得
+     d. web-push.sendNotification() でプッシュ送信
+   ```
+
+3. **ブラウザ受信** (`public/sw.js`)
+   ```
+   - Service Worker の 'push' イベントが発火
+   - ペイロードから通知内容を取得
+   - registration.showNotification() でOS通知を表示
+   ```
+
+4. **通知クリック**
+   ```
+   - Service Worker の 'notificationclick' イベントが発火
+   - clients.openWindow() でアプリを開く
+   - URL: /tsumu/ （GitHub Pagesのプロジェクトパス）
+   ```
+
+### テスト通知の流れ
+1. 通知設定画面で「テスト通知を送信」をクリック
+2. `/api/notifications/test` エンドポイントにリクエスト
+3. Renderサーバーが即座にプッシュ通知を送信
+4. 数秒以内に通知が届く
+
+### エラーハンドリング
+- **410 Gone**: 購読が無効化されている場合、DBから自動削除
+- **送信失敗**: ログに記録し、failed カウントを増やす
+- **VAPID未設定**: エラーメッセージを表示して終了
