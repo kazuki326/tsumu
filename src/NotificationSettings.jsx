@@ -262,8 +262,6 @@ export default function NotificationSettings() {
                 margin: 0
               }}
             >
-              <option value="12:00">12:00 (正午)</option>
-              <option value="13:00">13:00 (午後1時)</option>
               <option value="18:00">18:00 (午後6時)</option>
               <option value="19:00">19:00 (午後7時)</option>
               <option value="20:00">20:00 (午後8時)</option>
