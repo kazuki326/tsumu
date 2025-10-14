@@ -780,10 +780,10 @@ app.post("/api/notifications/test", auth, async (req, res) => {
     const payload = JSON.stringify({
       title: "テスト通知",
       body: "これはテスト通知です。通知機能が正常に動作しています！",
-      icon: "/icon-192.png",
-      badge: "/badge-72.png",
+      icon: "/tsumu/icon-192.png",
+      badge: "/tsumu/badge-72.png",
       tag: "test-notification",
-      url: "/",
+      url: "/tsumu/",
     });
 
     let sent = 0;

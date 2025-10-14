@@ -2,8 +2,10 @@ name: Send Push Notifications
 
 on:
   schedule:
-    # 18:00-24:00 JST = 9:00-15:00 UTC（1時間ごと）
-    - cron: '0 9-15 * * *'
+    # テスト用: 12:15 JST = 3:15 UTC（毎日）
+    - cron: '15 3 * * *'
+    # 本番用: 18:00-24:00 JST = 9:00-15:00 UTC（1時間ごと）
+    # - cron: '0 9-15 * * *'
   workflow_dispatch: # 手動実行も可能
 
 jobs:

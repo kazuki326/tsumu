@@ -18,8 +18,8 @@ self.addEventListener('push', (event) => {
   let data = {
     title: 'TSUMU COINS',
     body: '通知が届きました',
-    icon: '/icon-192.png',
-    badge: '/badge-72.png',
+    icon: '/tsumu/icon-192.png',
+    badge: '/tsumu/badge-72.png',
     tag: 'tsumu-notification',
     requireInteraction: false,
   };
@@ -40,7 +40,7 @@ self.addEventListener('push', (event) => {
     tag: data.tag,
     requireInteraction: data.requireInteraction,
     data: {
-      url: data.url || '/',
+      url: data.url || '/tsumu/',
       timestamp: Date.now(),
     },
   };
@@ -55,7 +55,7 @@ self.addEventListener('notificationclick', (event) => {
   console.log('[SW] Notification clicked', event);
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url || '/';
+  const urlToOpen = event.notification.data?.url || '/tsumu/';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {

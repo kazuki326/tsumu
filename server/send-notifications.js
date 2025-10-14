@@ -99,8 +99,11 @@ async function sendDailyReminders() {
 
   const settings = await sqlAll(settingsQuery, []);
 
+  console.log(`  Found ${settings.length} users with daily reminders enabled`);
+
   let totalSent = 0;
   let totalFailed = 0;
+  let totalSkipped = 0;
 
   for (const setting of settings) {
     const reminderTime = setting.reminder_time;
@@ -109,8 +112,12 @@ async function sendDailyReminders() {
 
     // 時刻が完全一致するかチェック（時のみ）
     if (currentHour !== reminderHour) {
+      console.log(`  Skipping ${setting.name} (reminder time ${reminderTime} != current ${currentTime})`);
+      totalSkipped++;
       continue;
     }
+
+    console.log(`  Processing ${setting.name} (reminder time matches: ${reminderTime})`);
 
     // 今日すでに記録しているかチェック
     const hasRecordToday = await sqlAll(
@@ -121,6 +128,7 @@ async function sendDailyReminders() {
     // すでに記録済みの場合はスキップ
     if (hasRecordToday.length > 0) {
       console.log(`  Skipping ${setting.name} (already recorded today)`);
+      totalSkipped++;
       continue;
     }
 
@@ -132,16 +140,19 @@ async function sendDailyReminders() {
 
     if (subscriptions.length === 0) {
       console.log(`  No subscriptions for ${setting.name}`);
+      totalSkipped++;
       continue;
     }
+
+    console.log(`  Found ${subscriptions.length} subscription(s) for ${setting.name}`);
 
     const payload = JSON.stringify({
       title: "TSUMU COINS - リマインダー",
       body: "今日のコインを記録しましょう！",
-      icon: "/icon-192.png",
-      badge: "/badge-72.png",
+      icon: "/tsumu/icon-192.png",
+      badge: "/tsumu/badge-72.png",
       tag: "daily-reminder",
-      url: "/",
+      url: "/tsumu/",
     });
 
     for (const sub of subscriptions) {
@@ -171,7 +182,7 @@ async function sendDailyReminders() {
     }
   }
 
-  console.log(`[${new Date().toISOString()}] Batch complete: sent=${totalSent}, failed=${totalFailed}`);
+  console.log(`[${new Date().toISOString()}] Batch complete: sent=${totalSent}, failed=${totalFailed}, skipped=${totalSkipped}`);
 
   if (USE_PG) {
     await pgPool.end();
