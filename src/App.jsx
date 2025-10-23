@@ -46,6 +46,8 @@ export default function App() {
   const [coins, setCoins] = useState("");
   const [busy, setBusy] = useState(false);
   const [flash, setFlash] = useState({ type: "", text: "" });
+  const [serverReady, setServerReady] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("サーバーを起動しています…");
 
   const [token, setToken] = useState(() => localStorage.getItem("token") || "");
   const loggedIn = useMemo(() => !!token, [token]);
@@ -78,38 +80,74 @@ export default function App() {
 
   /* ---- 初期読み込み ---- */
   const loadStatus = async () => {
-    const st = await api.status();
-    if (!st?.error) {
+    try {
+      const st = await api.status();
+      if (st?.error) throw new Error(st.error);
       setCanEdit(!!st.canEditToday);
       setTodayYmd(st.today_ymd || "");
       setBoardDate(st.board_date_ymd || "");
-      // ★ 過去編集フラグを反映
+      // allow past edit flags to sync
       setAllowPastEdits(!!st.allowPastEdits);
       setPastEditMaxDays(Number(st.pastEditMaxDays || 0));
+      setStatusMessage("");
+      setServerReady(true);
+      return true;
+    } catch (err) {
+      console.warn("Failed to load status:", err);
+      const hint = err?.message?.includes("Failed to fetch")
+        ? "サーバーを起動中です… 自動で再試行します"
+        : `サーバーに接続できません (${err?.message || "不明なエラー"})`;
+      setStatusMessage(hint);
+      return false;
     }
   };
-
   const loadMy = async () => {
     if (!loggedIn) { setMyHistory([]); return; }
-    // 充分な件数を確保（テーブルは14行、合計は7/30日で使う）
-    const me = await api.myCoins(120);
-    setMyHistory(Array.isArray(me) ? me : []);
+    try {
+      // fetch enough rows for summary tables
+      const me = await api.myCoins(120);
+      setMyHistory(Array.isArray(me) ? me : []);
+    } catch (err) {
+      console.warn("Failed to load history:", err);
+    }
   };
-
   const loadBoard = async () => {
-    const opts = { ...modeMap[boardTab] };
-    if (todayYmd && canEdit) opts.date = todayYmd; // 日中は今日（暫定）
-    const b = await api.board(opts);
-    setBoard(Array.isArray(b?.board) ? b.board : []);
-    if (b?.date_ymd) setBoardDate(b.date_ymd);
-    setIsProvisional(!!(todayYmd && canEdit && b?.date_ymd === todayYmd));
-    setStaleBoard(!!b?._fromCache);
+    try {
+      const opts = { ...modeMap[boardTab] };
+      if (todayYmd && canEdit) opts.date = todayYmd; // 日中は今日を暫定！
+      const b = await api.board(opts);
+      setBoard(Array.isArray(b?.board) ? b.board : []);
+      if (b?.date_ymd) setBoardDate(b.date_ymd);
+      setIsProvisional(!!(todayYmd && canEdit && b?.date_ymd === todayYmd));
+      setStaleBoard(!!b?._fromCache);
+    } catch (err) {
+      console.warn("Failed to load board:", err);
+    }
   };
+  useEffect(() => {
+    let cancelled = false;
+    let retryId;
+    const attempt = async () => {
+      const ok = await loadStatus();
+      if (cancelled || ok) return;
+      retryId = window.setTimeout(attempt, 2000);
+    };
+    attempt();
+    return () => {
+      cancelled = true;
+      if (retryId) window.clearTimeout(retryId);
+    };
+  }, []);
 
-  useEffect(() => { loadStatus(); }, []);
-  useEffect(() => { loadMy(); }, [loggedIn]);
-  useEffect(() => { loadBoard(); }, [boardTab, loggedIn, todayYmd, canEdit]);
+  useEffect(() => {
+    if (!serverReady) return;
+    loadMy();
+  }, [loggedIn, serverReady]);
 
+  useEffect(() => {
+    if (!serverReady) return;
+    loadBoard();
+  }, [boardTab, loggedIn, todayYmd, canEdit, serverReady]);
   /* ---- 認証 ---- */
   const doLogin = async () => {
     if (!name.trim() || pin.trim().length < 4) return alert("名前と4桁以上のPINを入力してね");
@@ -171,6 +209,16 @@ export default function App() {
 
   // 自分の最新コイン（年末試算に使用）
   const latestCoins = useMemo(() => Number(myHistory[0]?.coins ?? 0), [myHistory]);
+
+  if (!serverReady) {
+    return (
+      <div className="splash" role="status" aria-live="polite">
+        <h1 className="splash-logo">TSUMU COINS</h1>
+        <div className="splash-spinner" />
+        <p className="splash-text">{statusMessage || "サーバーの準備をしています…"}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="container">

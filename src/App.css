@@ -82,6 +82,46 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
 }
 .toast.error { background: #fff2f2; color: #b3261e; }
 
+.splash {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px 16px;
+  gap: 24px;
+  color: var(--ink);
+}
+
+.splash-logo {
+  margin: 0;
+  font-size: 48px;
+  font-weight: 900;
+  letter-spacing: 2px;
+}
+
+.splash-spinner {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 6px solid rgba(255, 255, 255, 0.6);
+  border-top-color: var(--accent);
+  animation: splash-spin 1s linear infinite;
+  box-shadow: 0 12px 24px #0000001f;
+}
+
+.splash-text {
+  margin: 0;
+  font-size: 16px;
+  color: var(--muted);
+}
+
+@keyframes splash-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* タブ */
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .tab {
