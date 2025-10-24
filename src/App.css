@@ -1,33 +1,84 @@
-/* src/App.css — ランキング枠あり（太さはそのまま） */
+/* =========================================================
+   TSUMU COINS — App.css (Full, blue-polish)
+   Theme: Indigo/Violet → “Selected = Blue”, headers = light-blue
+   ========================================================= */
 
-:root {
-  --bg: #f7f9ff;
-  --card: #ffffff;
-  --ink: #23263a;
-  --accent: #ff7fb0;
-  --ok: #1b8a3a;
-  --ng: #d33;
-  --muted: #6b7280;
+/* =========================
+   Brand Palette (Indigo/Violet)
+   ========================= */
+:root{
+  /* Base surfaces & text */
+  --bg:    #f6f7ff;
+  --card:  #ffffff;
+  --ink:   #1c2240;
+  --muted: #667085;
+
+  /* Brand core (Indigo / Blue) */
+  --brand-700:#4338CA;
+  --brand-600:#4F46E5; /* main accent (selected) */
+  --brand-500:#6366F1;
+  --brand-400:#818CF8;
+  --brand-300:#A5B4FC;
+  --brand-200:#C7D2FE;
+  --brand-100:#E5E7FF;
+
+  /* Secondary (Violet) – subtle spice */
+  --violet-500:#8B5CF6;
+  --violet-300:#C4B5FD;
+
+  /* Status */
+  --ok:#15a46b;
+  --ng:#d33;
+
+  /* Component-level tokens */
+  --accent:       var(--brand-600);  /* 選択時は常に青 */
+  --accent-ink:   #fff;
+  --accent-weak:  var(--brand-100);  /* タブ等の未選択 */
+  --focus:        var(--brand-500);
+  --cap-top:      var(--brand-600);
+
+  /* Light blue header band (top-of-card) */
+  --head-from:    #eef4ff; /* very light blue */
+  --head-to:      #e9f1ff; /* very light blue */
+
+  /* background soft radial */
+  --bg-radial-a:  #e9edff;
+  --bg-radial-b:  #efe9ff;
+
+  --ring: 3px;
 }
 
+/* =========================
+   Reset-ish
+   ========================= */
 * { box-sizing: border-box; }
 html, body { height: 100%; }
-body {
+
+/* =========================
+   Layout & Typography
+   ========================= */
+body{
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(40vw 40vw at 20% -10%, #ffe6f2 0%, transparent 60%),
-    radial-gradient(35vw 35vw at 100% 20%, #e6f3ff 0%, transparent 60%),
+    radial-gradient(40vw 40vw at 20% -10%, var(--bg-radial-b) 0%, transparent 60%),
+    radial-gradient(35vw 35vw at 100% 20%, var(--bg-radial-a) 0%, transparent 60%),
     var(--bg);
 }
-
 .container { max-width: 980px; margin: 32px auto; padding: 0 16px; }
+
 h1 { margin: 0 0 16px; font-weight: 900; letter-spacing: .5px; text-shadow: 0 3px 0 #fff8; }
 h2, h3 { margin: 8px 0 12px; }
 .muted { color: var(--muted); font-size: 12px; margin-top: 8px; }
 
-.card {
+table, .rank-value { font-variant-numeric: tabular-nums; }
+
+/* =========================
+   Cards / Panels
+   ========================= */
+.card,
+.panel{
   background: var(--card);
   border-radius: 20px;
   box-shadow: 0 10px 30px #00000012;
@@ -35,13 +86,47 @@ h2, h3 { margin: 8px 0 12px; }
   margin: 12px 0;
 }
 
+/* “Top cap” block */
+.cap{
+  background: var(--card);
+  border-radius: 20px;
+  box-shadow: 0 10px 30px #00000012;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--brand-200) 55%, #fff);
+  position: relative;
+  margin: 12px 0;
+}
+.cap::before{
+  content:"";
+  position:absolute; inset:0 0 auto 0; height:8px;
+  background: linear-gradient(90deg, var(--cap-top), color-mix(in oklab, var(--cap-top) 70%, var(--violet-500)));
+}
+
+/* 薄い青のヘッダー帯（マイページ、履歴カードの一番上など） */
+.head--strong{
+  background: linear-gradient(135deg, var(--head-from), var(--head-to));
+  border-bottom: 1px solid color-mix(in oklab, var(--brand-300) 45%, #fff);
+  padding: 16px 24px;
+}
+
+.panel-title { margin: 0; font-size: 16px; font-weight: 800; }
+.panel-sub { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.panel-body { padding: 16px 24px; }
+
+/* Subcards / utility */
+.subcard { padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; margin-top: 8px; }
+
+/* =========================
+   Forms & Buttons
+   ========================= */
 input {
   width: 100%;
   padding: 12px 14px;
   margin: 8px 0 12px;
   border-radius: 12px;
-  border: 1px solid #e6e8f0;
+  border: 1px solid color-mix(in oklab, var(--brand-200) 65%, #e6e8f0);
   font-size: 16px;
+  background: #fff;
 }
 
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -52,21 +137,31 @@ button {
   border: none;
   padding: 12px 16px;
   border-radius: 14px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent);       /* 常に青（選択色の統一） */
+  color: var(--accent-ink);
   font-weight: 700;
   cursor: pointer;
+  transition: transform .15s ease, filter .15s ease, box-shadow .15s ease;
 }
 button:disabled { opacity: .6; cursor: not-allowed; }
-button.ghost { background: #eef1ff; color: #4a57e2; }
-button.link { background: transparent; color: #2b6cb0; text-decoration: underline; padding: 8px 0; }
+button:hover:not(:disabled) { filter: brightness(1.02); transform: translateY(-1px); }
+button:active:not(:disabled) { transform: translateY(0); }
 
-table { width: 100%; border-collapse: collapse; }
-th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; }
-.pos { color: var(--ok); }
-.neg { color: var(--ng); }
+button.ghost { background: var(--accent-weak); color: var(--brand-600); }
+button.link { background: transparent; color: var(--brand-600); text-decoration: underline; padding: 8px 0; }
 
-/* トースト */
+/* Focus ring unified */
+button:focus-visible,
+.tab:focus-visible,
+input:focus-visible,
+details[open] .collapse-summary:focus-visible{
+  outline: none;
+  box-shadow: 0 0 0 var(--ring) color-mix(in oklab, var(--focus) 45%, transparent);
+}
+
+/* =========================
+   Toast
+   ========================= */
 .toast {
   position: sticky;
   top: 8px;
@@ -74,14 +169,17 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
   margin: 8px 0 16px;
   padding: 10px 14px;
   border-radius: 12px;
-  background: #f0fff3;
-  color: #0a7a2a;
+  background: color-mix(in oklab, #d1fae5 80%, white);
+  color: #065f46;
   box-shadow: 0 6px 16px #00000012;
   text-align: left;
   font-weight: 600;
 }
-.toast.error { background: #fff2f2; color: #b3261e; }
+.toast.error { background: color-mix(in oklab, #fee2e2 80%, white); color: #991b1b; }
 
+/* =========================
+   Splash
+   ========================= */
 .splash {
   min-height: 100vh;
   display: flex;
@@ -93,53 +191,75 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
   gap: 24px;
   color: var(--ink);
 }
-
 .splash-logo {
   margin: 0;
   font-size: 48px;
   font-weight: 900;
   letter-spacing: 2px;
 }
-
 .splash-spinner {
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  border: 6px solid rgba(255, 255, 255, 0.6);
-  border-top-color: var(--accent);
+  border: 6px solid rgba(255,255,255,0.8);
+  border-top-color: var(--brand-500);
   animation: splash-spin 1s linear infinite;
   box-shadow: 0 12px 24px #0000001f;
 }
+.splash-text { margin: 0; font-size: 16px; color: var(--muted); }
+@keyframes splash-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-.splash-text {
-  margin: 0;
-  font-size: 16px;
-  color: var(--muted);
-}
-
-@keyframes splash-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* タブ */
+/* =========================
+   Tabs
+   ========================= */
 .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .tab {
-  background: #eef1ff;
-  color: #4a57e2;
+  background: #eef0f5;            /* 未選択はグレーのまま */
+  color: #3b4899;
   border: none;
   padding: 8px 12px;
   border-radius: 999px;
   cursor: pointer;
   font-weight: 700;
+  transition: background .15s ease, color .15s ease, transform .15s ease;
 }
-.tab.active { background: #4a57e2; color: #fff; }
+.tab:hover { transform: translateY(-1px); }
 
-/* マイページ内タブ（控えめカラー） */
-.tabs.secondary .tab { background: #f4f6ff; color: #3141c5; }
-.tabs.secondary .tab.active { background: #3141c5; color: #fff; }
+/* 選択中は“青”に固定（ピンク残像を完全排除） */
+.tab.active,
+.tab[aria-selected="true"],
+.tabs.secondary .tab.active,
+.tabs.secondary .tab[aria-selected="true"]{
+  background: var(--brand-600) !important;
+  color: #fff !important;
+  border-color: transparent !important;
+}
+.tab.active:hover,
+.tab[aria-selected="true"]:hover,
+.tabs.secondary .tab.active:hover,
+.tabs.secondary .tab[aria-selected="true"]:hover{
+  background: var(--brand-600) !important;
+  color: #fff !important;
+  transform: translateY(-1px);
+}
 
-/* ランキング枠（太さそのまま） */
+/* Secondary tab (inside My Page area) */
+.tabs.secondary .tab { background: #eef0f5; color: #3b4899; }
+
+/* =========================
+   Tables
+   ========================= */
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 6px; border-bottom: 1px solid color-mix(in oklab, var(--brand-200) 55%, #f0f2f8); text-align: left; }
+th { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: .2px; }
+td { font-size: 14px; }
+tbody tr:hover { background: #fafbff; }
+.pos { color: var(--ok); }
+.neg { color: var(--ng); }
+
+/* =========================
+   Leaderboard (frame + bars)
+   ========================= */
 .rank-box {
   border: 2px solid #e6e8f0;
   border-radius: 16px;
@@ -147,7 +267,6 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
   background: #fff;
 }
 
-/* ランキング＋棒グラフ */
 .rank-wrap { margin-top: 6px; }
 .rank-list { list-style: none; padding: 0; margin: 0; }
 .rank-list li {
@@ -155,24 +274,24 @@ th, td { padding: 10px 6px; border-bottom: 1px solid #f0f2f8; text-align: left; 
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: center;
-  padding: 8px 0;
+  padding: 10px 0;
 }
 .rank-list li + li { border-top: 1px solid #f5f6fb; }
-.rank-name { font-weight: 600; }
-.rank-value { font-variant-numeric: tabular-nums; }
+.rank-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  color: #334155; font-weight: 700;
+}
+.rank-value { text-align: right; font-weight: 800; min-width: 9ch; }
 
-.bar { grid-column: 1 / -1; height: 10px; background: #eef1ff; border-radius: 8px; overflow: hidden; }
-.bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 8px; transition: width .3s ease; }
+.bar { grid-column: 1 / -1; height: 10px; background: var(--accent-weak); border-radius: 8px; overflow: hidden; }
+.bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 8px; transition: width .35s ease; }
+@media (prefers-reduced-motion: reduce) {
+  .bar-fill, .splash-spinner, button { transition: none !important; animation: none !important; }
+}
 
-footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
-
-.subcard { padding: 12px; border: 1px solid #e5e7eb; border-radius: 12px; margin-top: 8px; }
-
-
-
-
-
-/* 折りたたみ（toggle） */
+/* =========================
+   Collapse (details/summary)
+   ========================= */
 .collapse {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
@@ -188,6 +307,9 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
   padding: 12px 14px;
   cursor: pointer;
   user-select: none;
+  background: #fafbff;
+  border-bottom: 1px solid #eef2f7;
+  border-radius: 12px 12px 0 0;
 }
 .collapse-summary::-webkit-details-marker { display: none; }
 .summary-left { display: flex; align-items: center; gap: 8px; }
@@ -196,9 +318,12 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
 .collapse-body {
   padding: 8px 14px 12px;
   border-top: 1px solid #eef2f7;
+  background: #fff;
 }
 
-/* 既存の編集リスト用（なければ追加） */
+/* =========================
+   Edit list (recent edits)
+   ========================= */
 .edit-list { list-style: none; padding: 0; margin: 8px 0 0; }
 .edit-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px dashed #eee; }
 .edit-row:last-child { border-bottom: none; }
@@ -207,17 +332,15 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
 .error { color: #ef4444; }
 .small { font-size: 12px; }
 
-
-/* 任意: マイページの「ようこそ」行を少しだけ強調 */
+/* =========================
+   Optional emphasis
+   ========================= */
 .welcome-line { margin-top: -4px; color: #475569; }
 
-/* 任意: 年末試算の入力ボックスをもう少し小さく */
-.subcard input { max-width: 160px; text-align: right; }
 
-/* 任意: ランキングの数値を右寄せ＆太字に */
-.rank-value { text-align: right; font-weight: 700; }
-
-/* トグルスイッチ */
+/* =========================
+   Toggle switch
+   ========================= */
 .toggle-switch {
   position: relative;
   display: inline-block;
@@ -225,153 +348,173 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
   height: 28px;
   flex-shrink: 0;
 }
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-  margin: 0;
-}
-
+.toggle-switch input { opacity: 0; width: 0; height: 0; margin: 0; }
 .toggle-slider {
   position: absolute;
   cursor: pointer;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: #cbd5e1;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #cbd5e1;  /* グレーのまま（要望どおり） */
   transition: .3s;
   border-radius: 28px;
+  outline: none;
 }
-
 .toggle-slider:before {
   position: absolute;
   content: "";
-  height: 20px;
-  width: 20px;
-  left: 4px;
-  bottom: 4px;
+  height: 20px; width: 20px;
+  left: 4px; bottom: 4px;
   background-color: white;
   transition: .3s;
   border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+.toggle-switch input:checked + .toggle-slider { background-color: var(--accent); }
+.toggle-switch input:checked + .toggle-slider:before { transform: translateX(22px); }
+.toggle-switch input:disabled + .toggle-slider { opacity: .5; cursor: not-allowed; }
+.toggle-switch input:focus-visible + .toggle-slider {
+  box-shadow: 0 0 0 var(--ring) color-mix(in oklab, var(--accent) 35%, transparent);
 }
 
-.toggle-switch input:checked + .toggle-slider {
-  background-color: var(--accent);
-}
-
-.toggle-switch input:checked + .toggle-slider:before {
-  transform: translateX(22px);
-}
-
-.toggle-switch input:disabled + .toggle-slider {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 通知設定のレイアウト（スマホ対応） */
-.notification-section {
-  margin-bottom: 20px;
-}
-
-.notification-section h3 {
-  margin: 0 0 12px;
-  font-size: 16px;
-}
-
-.notification-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-  font-size: 14px;
-}
-
+/* =========================
+   Notification settings
+   ========================= */
+.notification-section { margin-bottom: 20px; }
+.notification-section h3 { margin: 0 0 12px; font-size: 16px; }
+.notification-status { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; font-size: 14px; }
 .toggle-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 12px;
 }
-
-.toggle-label-text {
-  flex: 1;
-  font-weight: 600;
-  font-size: 15px;
-}
-
+.toggle-label-text { flex: 1; font-weight: 600; font-size: 15px; }
 .time-input-wrapper {
-  margin-left: 0;
-  margin-top: 8px;
-  padding: 12px;
-  background: #f9fafb;
-  border-radius: 10px;
+  margin-left: 0; margin-top: 8px; padding: 12px;
+  background: #f9fafb; border-radius: 10px;
 }
-
-.time-input-wrapper label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 13px;
-  color: #64748b;
-  font-weight: 600;
-}
-
+.time-input-wrapper label { display: block; margin-bottom: 6px; font-size: 13px; color: #64748b; font-weight: 600; }
 .time-input-wrapper input[type="time"] {
+  width: 100%; max-width: 200px; margin: 0; padding: 10px; font-size: 16px;
+}
+.notification-buttons { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.notification-buttons button { width: 100%; }
+@media (min-width: 480px) {
+  .notification-buttons { flex-direction: row; }
+  .notification-buttons button { width: auto; flex: 1; }
+  .notification-status { flex-direction: row; flex-wrap: wrap; }
+}
+.ios-notice {
+  margin-top: 16px; padding: 12px; background: #fef3c7;
+  border-radius: 10px; font-size: 14px;
+}
+.ios-notice strong { display: block; margin-bottom: 8px; }
+.ios-notice ol { margin: 8px 0 0; padding-left: 20px; }
+.ios-notice ol li { margin-bottom: 4px; }
+
+/* =========================
+   KPI grid (Year-end projection)
+   ========================= */
+.kpi-grid { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kpi { border: 1px solid #eef2f7; border-radius: 12px; padding: 12px; background: #fff; }
+.kpi .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.kpi .value { font-size: 18px; font-weight: 900; }
+@media (max-width: 560px) { .kpi-grid { grid-template-columns: 1fr; } }
+
+/* =========================
+   Chart card
+   ========================= */
+.chart-card { background: #fff; border: 1px solid #f0f2f8; border-radius: 14px; padding: 12px; }
+
+/* =========================
+   Footer
+   ========================= */
+footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
+
+/* =========================
+   Dark mode
+   ========================= */
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1221;
+    --card:#0e1324;
+    --ink:#e6e8f7;
+    --muted:#9aa4c2;
+
+    --brand-700:#6b63ff;
+    --brand-600:#7a73ff;
+    --brand-500:#8a84ff;
+    --brand-400:#a3a1ff;
+    --brand-300:#bdbbff;
+    --brand-200:#d6d5ff;
+    --brand-100:#e9e9ff;
+
+    --accent: var(--brand-600);
+    --accent-weak: #141a34;
+
+    /* ダークでも“薄い青”方向のヘッダーに */
+    --cap-top: var(--brand-600);
+    --head-from: #152243;
+    --head-to:   #192a52;
+    --bg-radial-a:#101632; --bg-radial-b:#191238;
+  }
+
+  body{
+    background:
+      radial-gradient(40vw 40vw at 20% -10%, var(--bg-radial-b) 0%, transparent 60%),
+      radial-gradient(35vw 35vw at 100% 20%, var(--bg-radial-a) 0%, transparent 60%),
+      var(--bg);
+  }
+
+  .card, .panel, .cap, .rank-box, .subcard, .collapse, .chart-card {
+    border-color:#1a2244 !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  }
+
+  .tabs .tab { background:#141a34; color:#c8cdff; }
+  .tabs .tab.active { background: var(--accent); color:#fff; }
+
+  tbody tr:hover { background:#0e1324; }
+
+  .ios-notice { background: #2c2336; color: #d8cfff; }
+}
+
+/* =========================
+   Forms layout helpers
+   ========================= */
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: stretch;
+}
+.input-long {
   width: 100%;
-  max-width: 200px;
-  margin: 0;
-  padding: 10px;
+  max-width: 760px;
+  min-width: 380px;
   font-size: 16px;
 }
-
-.notification-buttons {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 12px;
+.input-ch { width: clamp(28ch, 52ch, 68ch); }
+@media (max-width: 560px) {
+  .form-row { grid-template-columns: 1fr; }
+  .input-long { min-width: 0; max-width: 100%; }
 }
 
-.notification-buttons button {
-  width: 100%;
+/* ===== 今日の入力パネル（縦積み & フル幅） ===== */
+.stack { display: flex; flex-direction: column; gap: 12px; }
+/* 入力は横いっぱい */
+.subcard .stack input { width: 100%; min-width: 0; font-size: 16px; padding: 12px 14px; }
+/* “保存”ボタンは自動幅＆左寄せ */
+.btn-auto { width: auto; align-self: flex-start; padding-inline: 20px; }
+/* 今日のコイン数だけは左寄せ（右寄せ指定の上書き） */
+.subcard .input-left { text-align: left !important; }
+
+/* アクセシビリティ（フォーカス可視） */
+.stack input:focus-visible,
+.btn-auto:focus-visible,
+.btn-wide:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 35%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 50%, #e6e8f0);
 }
 
-@media (min-width: 480px) {
-  .notification-buttons {
-    flex-direction: row;
-  }
-
-  .notification-buttons button {
-    width: auto;
-    flex: 1;
-  }
-
-  .notification-status {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-}
-
-.ios-notice {
-  margin-top: 16px;
-  padding: 12px;
-  background: #fef3c7;
-  border-radius: 10px;
-  font-size: 14px;
-}
-
-.ios-notice strong {
-  display: block;
-  margin-bottom: 8px;
-}
-
-.ios-notice ol {
-  margin: 8px 0 0;
-  padding-left: 20px;
-}
-
-.ios-notice ol li {
-  margin-bottom: 4px;
+@media (prefers-reduced-motion: reduce) {
+  .btn-wide, .stack input { transition: none !important; }
 }
