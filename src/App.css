@@ -261,9 +261,9 @@ tbody tr:hover { background: #fafbff; }
    Leaderboard (frame + bars)
    ========================= */
 .rank-box {
-  border: 2px solid #e6e8f0;
-  border-radius: 16px;
-  padding: 12px;
+  border: 1px solid #e9ecf6;      /* ← 枠を細く */
+  border-radius: 12px;             /* ← ちょい小さめ */
+  padding: 10px;                   /* ← 余白縮小 */
   background: #fff;
 }
 
@@ -283,7 +283,7 @@ tbody tr:hover { background: #fafbff; }
 }
 .rank-value { text-align: right; font-weight: 800; min-width: 9ch; }
 
-.bar { grid-column: 1 / -1; height: 10px; background: var(--accent-weak); border-radius: 8px; overflow: hidden; }
+.bar { grid-column: 1 / -1; height: 8px; background: var(--accent-weak); border-radius: 8px; overflow: hidden; }
 .bar-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 8px; transition: width .35s ease; }
 @media (prefers-reduced-motion: reduce) {
   .bar-fill, .splash-spinner, button { transition: none !important; animation: none !important; }
@@ -336,7 +336,6 @@ tbody tr:hover { background: #fafbff; }
    Optional emphasis
    ========================= */
 .welcome-line { margin-top: -4px; color: #475569; }
-
 
 /* =========================
    Toggle switch
@@ -419,9 +418,23 @@ tbody tr:hover { background: #fafbff; }
 @media (max-width: 560px) { .kpi-grid { grid-template-columns: 1fr; } }
 
 /* =========================
-   Chart card
+   Chart card（枠と余白を軽量化）
    ========================= */
-.chart-card { background: #fff; border: 1px solid #f0f2f8; border-radius: 14px; padding: 12px; }
+.chart-card {
+  background: #fff;
+  border: 1px solid #e9ecf6;  /* ← 1px に */
+  border-radius: 12px;        /* ← 少し小さめ */
+  padding: 8px;               /* ← 余白縮小 */
+}
+@media (max-width: 560px) {
+  .chart-card { padding: 6px; border-radius: 10px; }
+}
+
+/* グラフが panel 内にある場合の余白 */
+.panel .chart-card,
+.panel .rank-box {
+  margin: 6px 0;
+}
 
 /* =========================
    Footer
@@ -517,4 +530,21 @@ footer { opacity: .6; padding: 12px 2px; font-size: 12px; }
 
 @media (prefers-reduced-motion: reduce) {
   .btn-wide, .stack input { transition: none !important; }
+}
+
+/* ===== スマホ最適化（マイページ右上ボタンを縦並び） ===== */
+@media (max-width: 560px) {
+  .actions-row {
+    flex-direction: column;   /* ← 縦積み */
+    width: 100%;
+    gap: 8px;
+  }
+  .actions-row button {
+    width: 100%;              /* ← 横いっぱい */
+  }
+  /* 見出し左右のレイアウトが窮屈にならないよう折り返し許容 */
+  .head--strong > div[style*="display: flex"] {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
 }

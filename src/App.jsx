@@ -340,7 +340,8 @@ export default function App() {
                     ようこそ <b>{displayName || "ゲスト"}</b> さん
                   </p>
                 </div>
-                <div className="row" style={{ flexShrink: 0 }}>
+                {/* ▼▼ ここを縦積み対応にするため actions-row を追加 ▼▼ */}
+                <div className="row actions-row" style={{ flexShrink: 0 }}>
                   <button className="ghost" disabled={busy} onClick={() => push("/notifications")}>
                     通知設定
                   </button>
@@ -360,6 +361,7 @@ export default function App() {
                     ログアウト
                   </button>
                 </div>
+                {/* ▲▲ ここまで ▲▲ */}
               </div>
             </div>
 
