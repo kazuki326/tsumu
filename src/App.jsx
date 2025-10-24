@@ -114,7 +114,7 @@ export default function App() {
       const hint =
         err?.message?.includes("Failed to fetch") || err?.message?.includes("fetch")
           ? "サーバーを起動中です… 自動で再試行します"
-          : `サーバーに接続できません (${err?.message || "不明なエラー"})`;
+          : `サーバーに接続中… (${err?.message || "不明なエラー"})`;
       setStatusMessage(hint);
       setServerReady(false);
       return false;
