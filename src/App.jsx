@@ -82,7 +82,19 @@ export default function App() {
   const loadStatus = async () => {
     try {
       const st = await api.status();
+
+      // 応答が有効かチェック
+      if (!st || typeof st !== 'object') {
+        throw new Error('サーバーから無効な応答が返されました');
+      }
+
       if (st?.error) throw new Error(st.error);
+
+      // 必須フィールドが存在するかチェック
+      if (!st.today_ymd) {
+        throw new Error('サーバーから必要なデータが返されませんでした');
+      }
+
       setCanEdit(!!st.canEditToday);
       setTodayYmd(st.today_ymd || "");
       setBoardDate(st.board_date_ymd || "");
@@ -94,10 +106,11 @@ export default function App() {
       return true;
     } catch (err) {
       console.warn("Failed to load status:", err);
-      const hint = err?.message?.includes("Failed to fetch")
+      const hint = err?.message?.includes("Failed to fetch") || err?.message?.includes("fetch")
         ? "サーバーを起動中です… 自動で再試行します"
         : `サーバーに接続できません (${err?.message || "不明なエラー"})`;
       setStatusMessage(hint);
+      setServerReady(false); // 明示的にfalseに設定
       return false;
     }
   };
@@ -430,16 +443,16 @@ function MyHistoryTable({ rows, endYmd }) {
       {sparklineData.length > 1 && (
         <div style={{ marginBottom: 12, padding: "8px 12px", background: "#f9fafb", borderRadius: 8 }}>
           <div className="muted" style={{ fontSize: 11, marginBottom: 4 }}>14日間の推移</div>
-          <svg width="100%" height="40" style={{ display: "block" }}>
+          <svg width="100%" height="40" viewBox="0 0 100 40" preserveAspectRatio="none" style={{ display: "block" }}>
             <polyline
               points={sparklineData.map((val, i) => {
                 const x = (i / (sparklineData.length - 1)) * 100;
                 const y = 35 - ((val - sparkMin) / (sparkMax - sparkMin || 1)) * 30;
-                return `${x}%,${y}`;
+                return `${x},${y}`;
               }).join(" ")}
               fill="none"
               stroke="var(--accent)"
-              strokeWidth="2"
+              strokeWidth="0.5"
               vectorEffect="non-scaling-stroke"
             />
             {sparklineData.map((val, i) => {
@@ -448,9 +461,9 @@ function MyHistoryTable({ rows, endYmd }) {
               return (
                 <circle
                   key={i}
-                  cx={`${x}%`}
+                  cx={x}
                   cy={y}
-                  r="2.5"
+                  r="1"
                   fill="var(--accent)"
                 />
               );

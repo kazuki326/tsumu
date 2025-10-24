@@ -9,7 +9,11 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(python:*)",
-      "Bash(npm run build:*)"
+      "Bash(npm run build:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill /F /PID 26972)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []
