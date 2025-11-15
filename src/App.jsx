@@ -549,7 +549,19 @@ function RecentEditPanel({ todayYmd, canEditToday, allowPastEdits = false, pastE
       await load();
       onUpdated?.();
     } catch (e) {
-      setErr(e.message || "更新に失敗しました");
+      // エラーメッセージを日本語化
+      const errMsg = e.message || "";
+      if (errMsg.includes("finalized")) {
+        setErr("この日はすでに締め切られています");
+      } else if (errMsg.includes("locked")) {
+        setErr("過去の記録は編集できない設定です");
+      } else if (errMsg.includes("only past")) {
+        setErr("編集可能な期間を過ぎています");
+      } else if (errMsg.includes("invalid date")) {
+        setErr("日付の形式が正しくありません");
+      } else {
+        setErr(errMsg || "更新に失敗しました");
+      }
     } finally {
       setBusy(false);
     }
