@@ -403,6 +403,7 @@ app.get("/api/my_latest", auth, async (req, res) => {
 });
 
 // 記録の修正（今日のみ or 環境変数で過去も許可）
+// upsert: 存在しなければ作成、存在すれば更新
 app.patch("/api/coins/:date", auth, async (req, res) => {
   const date_ymd = String(req.params.date || "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date_ymd))
@@ -429,23 +430,39 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
   }
 
   try {
+    // upsert: 存在チェックして insert or update
     const exist = await sqlGet(
       "SELECT id FROM coin_logs WHERE user_id=? AND date_ymd=?",
       [req.user.uid, date_ymd]
     );
-    if (!exist) return res.status(404).json({ error: "record not found for that date" });
 
-    if (USE_PG) {
-      await sqlRun("UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?", [
-        coins,
-        exist.id,
-      ]);
+    if (exist) {
+      // 既存レコードを更新
+      if (USE_PG) {
+        await sqlRun("UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?", [
+          coins,
+          exist.id,
+        ]);
+      } else {
+        await sqlRun("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?", [
+          coins,
+          nowISO(),
+          exist.id,
+        ]);
+      }
     } else {
-      await sqlRun("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?", [
-        coins,
-        nowISO(),
-        exist.id,
-      ]);
+      // 新規レコードを作成
+      if (USE_PG) {
+        await sqlRun(
+          "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, now())",
+          [req.user.uid, date_ymd, coins]
+        );
+      } else {
+        await sqlRun(
+          "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, ?)",
+          [req.user.uid, date_ymd, coins, nowISO()]
+        );
+      }
     }
 
     clearCache();
