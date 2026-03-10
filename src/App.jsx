@@ -1,20 +1,34 @@
 // src/App.jsx
-// - displayName を保持し、ログイン/登録後に「ようこそ◯◯さん」
-// - マイページ見出し下に常時「ようこそ◯◯さん」
-// - 年末(12/31)までの試算（既定 50,000 枚/日、編集可 & localStorage 保存）
-// - 自分の履歴：7日/30日 = “前日比(diff)の総和”
-// - 全体ランキング：4指標タブのみ（コイン数はグラフ無し、他は折れ線＋下にスナップショット棒）
-// - 直近の記録（修正）は折りたたみ＆過去編集可否フラグ対応
-// - Indigo/Violetトーンで統一（App.css と連動）
-
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Sun, Moon, Monitor, Settings, LogOut, ChevronDown, Calendar, Edit3, Target, TrendingUp, Trophy, History } from "lucide-react";
+
 import { api } from "./api";
-import "./App.css";
+import { useTheme } from "@/hooks/use-theme";
 import NotificationSettings from "./NotificationSettings";
 
-// 分割済みコンポーネント
+// shadcn/ui components
+import { Button } from "@/components/ui/button";
+import { Card, CardCap, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+  CollapsibleChevron,
+} from "@/components/ui/collapsible";
+
+// Custom components (keep existing)
 import { MyHistory } from "./components/MyHistory";
 import { Leaderboard } from "./components/Leaderboard";
+
+// Dashboard components
+import { KPICard, QuickInput, MiniChart, RankingPreview, YearEndMini } from "./components/dashboard";
+
+// Legacy CSS for splash, rank-box, etc.
+import "./App.css";
 
 /* =========================
    Routing (hash)
@@ -42,6 +56,31 @@ const addDays = (ymd, n) => {
 };
 
 /* =========================
+   Theme Toggle Button
+   ========================= */
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+
+  const cycleTheme = () => {
+    if (theme === "light") setTheme("dark");
+    else if (theme === "dark") setTheme("system");
+    else setTheme("light");
+  };
+
+  return (
+    <Button variant="ghost" size="icon" onClick={cycleTheme} title={`テーマ: ${theme}`}>
+      {theme === "dark" ? (
+        <Moon className="h-5 w-5" />
+      ) : theme === "light" ? (
+        <Sun className="h-5 w-5" />
+      ) : (
+        <Monitor className="h-5 w-5" />
+      )}
+    </Button>
+  );
+}
+
+/* =========================
    App
    ========================= */
 export default function App() {
@@ -54,8 +93,9 @@ export default function App() {
 
   // 今日の入力
   const [coins, setCoins] = useState("");
+  const [spent, setSpent] = useState("");
+  const [gacha, setGacha] = useState("");
   const [busy, setBusy] = useState(false);
-  const [flash, setFlash] = useState({ type: "", text: "" });
 
   // サーバ状態
   const [serverReady, setServerReady] = useState(false);
@@ -75,18 +115,22 @@ export default function App() {
   const [myHistory, setMyHistory] = useState([]);
 
   // ランキング
-  const [boardTab, setBoardTab] = useState("raw"); // "raw" | "daily" | "7d" | "30d"
+  const [boardTab, setBoardTab] = useState("earned7d");
   const [board, setBoard] = useState([]);
   const [boardDate, setBoardDate] = useState("");
   const [isProvisional, setIsProvisional] = useState(false);
   const [staleBoard, setStaleBoard] = useState(false);
 
-  // マイページのタブ
-  const [meTab, setMeTab] = useState("history"); // "history" | "leaderboard"
+  // RankingPreview専用: 7日間稼ぎランキング
+  const [earned7dBoard, setEarned7dBoard] = useState([]);
+
+  // マイページの詳細セクション開閉
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const { route, push } = useHashRoute();
 
   const modeMap = {
+    earned7d: { mode: "earned", periodDays: 7 },
     raw: { mode: "raw" },
     daily: { mode: "daily" },
     "7d": { mode: "period", periodDays: 7 },
@@ -137,7 +181,7 @@ export default function App() {
   const loadBoard = async () => {
     try {
       const opts = { ...modeMap[boardTab] };
-      if (todayYmd && canEdit) opts.date = todayYmd; // 日中は今日を暫定集計
+      if (todayYmd && canEdit) opts.date = todayYmd;
       const b = await api.board(opts);
       setBoard(Array.isArray(b?.board) ? b.board : []);
       if (b?.date_ymd) setBoardDate(b.date_ymd);
@@ -145,6 +189,18 @@ export default function App() {
       setStaleBoard(!!b?._fromCache);
     } catch (err) {
       console.warn("Failed to load board:", err);
+    }
+  };
+
+  // RankingPreview専用: 7日間稼ぎランキングを取得
+  const loadEarned7dBoard = async () => {
+    try {
+      const opts = { mode: "earned", periodDays: 7 };
+      if (todayYmd && canEdit) opts.date = todayYmd;
+      const b = await api.board(opts);
+      setEarned7dBoard(Array.isArray(b?.board) ? b.board : []);
+    } catch (err) {
+      console.warn("Failed to load earned7d board:", err);
     }
   };
 
@@ -166,6 +222,7 @@ export default function App() {
   useEffect(() => {
     if (!serverReady) return;
     loadMy();
+    loadEarned7dBoard();
   }, [loggedIn, serverReady]);
 
   useEffect(() => {
@@ -173,9 +230,18 @@ export default function App() {
     loadBoard();
   }, [boardTab, loggedIn, todayYmd, canEdit, serverReady]);
 
+  // todayYmd/canEditが変わったらearned7dBoardも更新
+  useEffect(() => {
+    if (!serverReady) return;
+    loadEarned7dBoard();
+  }, [todayYmd, canEdit, serverReady]);
+
   /* ---- 認証 ---- */
   const doLogin = async () => {
-    if (!name.trim() || pin.trim().length < 4) return alert("名前と4桁以上のPINを入力してね");
+    if (!name.trim() || pin.trim().length < 4) {
+      toast.error("名前と4桁以上のPINを入力してね");
+      return;
+    }
     setBusy(true);
     try {
       const res = await api.login(name.trim(), pin.trim());
@@ -184,12 +250,12 @@ export default function App() {
         setToken(res.token);
         localStorage.setItem("displayName", name.trim());
         setDisplayName(name.trim());
-        setFlash({ type: "success", text: `ようこそ ${name.trim()} さん` });
+        toast.success(`ようこそ ${name.trim()} さん`);
         setName("");
         setPin("");
         push("/me");
       } else {
-        alert(res.error || "ログインに失敗しました");
+        toast.error(res.error || "ログインに失敗しました");
       }
     } finally {
       setBusy(false);
@@ -205,11 +271,10 @@ export default function App() {
         setToken(res.token);
         localStorage.setItem("displayName", signupName.trim());
         setDisplayName(signupName.trim());
-        setFlash({ type: "success", text: `登録完了！ようこそ ${signupName.trim()} さん` });
-        setTimeout(() => setFlash({ type: "", text: "" }), 3000);
+        toast.success(`登録完了！ようこそ ${signupName.trim()} さん`);
         push("/me");
       } else {
-        alert(res.error || "登録に失敗しました");
+        toast.error(res.error || "登録に失敗しました");
       }
     } finally {
       setBusy(false);
@@ -219,19 +284,37 @@ export default function App() {
   /* ---- 今日の入力 ---- */
   const submitCoins = async () => {
     const n = Number(coins);
-    if (!Number.isInteger(n) || n < 0) return alert("0以上の整数で入力してね");
+    const s = Number(spent || 0);
+    const g = Number(gacha || 0);
+    if (!Number.isInteger(n) || n < 0) {
+      toast.error("コイン数は0以上の整数で入力してね");
+      return;
+    }
+    if (!Number.isInteger(s) || s < 0) {
+      toast.error("使った額は0以上の整数で入力してね");
+      return;
+    }
+    if (!Number.isInteger(g) || g < 0) {
+      toast.error("ガチャ回数は0以上の整数で入力してね");
+      return;
+    }
     setBusy(true);
     try {
-      const res = await api.postCoins(n);
-      if (res.error) return alert(res.error);
+      const res = await api.postCoins(n, s, g);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       setCoins("");
-      setFlash({ type: "success", text: "保存しました" });
-      setTimeout(() => setFlash({ type: "", text: "" }), 2000);
-      await Promise.all([loadMy(), loadBoard()]);
+      setSpent("");
+      setGacha("");
+      toast.success("保存しました");
+      await Promise.all([loadMy(), loadBoard(), loadEarned7dBoard()]);
     } finally {
       setBusy(false);
     }
   };
+
   const onCoinsKeyDown = (e) => {
     if (e.key === "Enter" && !busy) submitCoins();
   };
@@ -261,24 +344,32 @@ export default function App() {
      ========================= */
   return (
     <div className="container">
-      <h1 onClick={() => push(loggedIn ? "/me" : "/")} style={{ cursor: "pointer" }}>
-        TSUMU COINS
-      </h1>
-
-      {flash.text && <div className={`toast ${flash.type}`}>{flash.text}</div>}
+      <div className="flex items-center justify-between mb-4">
+        <h1
+          onClick={() => push(loggedIn ? "/me" : "/")}
+          className="text-3xl md:text-4xl font-black tracking-wide cursor-pointer"
+        >
+          TSUMU COINS
+        </h1>
+        <ThemeToggle />
+      </div>
 
       {/* ---------- / : ログイン + ランキング ---------- */}
       {route === "/" && (
         <>
-          <div className="card">
-            <h2>ログイン</h2>
-            <div className="field">
-              <label>名前</label>
-              <input placeholder="名前" value={name} onChange={(e) => setName(e.target.value)} />
+          <Card className="p-4 mb-4">
+            <h2 className="text-lg font-bold mb-4">ログイン</h2>
+            <div className="space-y-1">
+              <Label>名前</Label>
+              <Input
+                placeholder="名前"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
             </div>
-            <div className="field">
-              <label>PIN（4桁以上）</label>
-              <input
+            <div className="space-y-1">
+              <Label>PIN（4桁以上）</Label>
+              <Input
                 placeholder="PIN(4桁以上)"
                 type="password"
                 inputMode="numeric"
@@ -287,22 +378,22 @@ export default function App() {
                 onChange={(e) => setPin(e.target.value)}
               />
             </div>
-            <div className="row">
-              <button disabled={busy} onClick={doLogin}>
+            <div className="flex gap-2 flex-wrap mt-4">
+              <Button disabled={busy} onClick={doLogin}>
                 ログイン
-              </button>
-              <button className="link" onClick={() => (window.location.hash = "/signup")}>
+              </Button>
+              <Button variant="link" onClick={() => (window.location.hash = "/signup")}>
                 新規登録はこちら
-              </button>
+              </Button>
             </div>
-          </div>
+          </Card>
 
           {/* Top ランキング（非ログインでも閲覧） */}
-          <div className="cap">
-            <div className="head--strong">
-              <h3 style={{ margin: 0 }}>全体ランキング</h3>
-            </div>
-            <div className="panel-body">
+          <CardCap>
+            <CardHeader>
+              <CardTitle>全体ランキング</CardTitle>
+            </CardHeader>
+            <CardContent>
               <Leaderboard
                 boardTab={boardTab}
                 setBoardTab={setBoardTab}
@@ -311,8 +402,8 @@ export default function App() {
                 isProvisional={isProvisional}
                 stale={staleBoard}
               />
-            </div>
-          </div>
+            </CardContent>
+          </CardCap>
         </>
       )}
 
@@ -323,133 +414,59 @@ export default function App() {
 
       {/* ---------- /me ---------- */}
       {route === "/me" && loggedIn && (
-        <>
-          <div className="cap" style={{ marginBottom: 16 }}>
-            <div className="head--strong">
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 12
-                }}
-              >
-                <div>
-                  <h2 style={{ margin: 0 }}>マイページ</h2>
-                  <p className="welcome-line" style={{ margin: "4px 0 0" }}>
-                    ようこそ <b>{displayName || "ゲスト"}</b> さん
-                  </p>
-                </div>
-                {/* ▼▼ ここを縦積み対応にするため actions-row を追加 ▼▼ */}
-                <div className="row actions-row" style={{ flexShrink: 0 }}>
-                  <button className="ghost" disabled={busy} onClick={() => push("/notifications")}>
-                    通知設定
-                  </button>
-                  <button
-                    className="ghost"
-                    disabled={busy}
-                    onClick={() => {
-                      localStorage.removeItem("token");
-                      setToken("");
-                      setFlash({ type: "", text: "" });
-                      localStorage.removeItem("displayName");
-                      setDisplayName("");
-                      setCoins("");
-                      window.location.hash = "/";
-                    }}
-                  >
-                    ログアウト
-                  </button>
-                </div>
-                {/* ▲▲ ここまで ▲▲ */}
-              </div>
-            </div>
-
-            {/* 入力 & ユーティリティ */}
-            <div className="panel-body">
-              {/* 今日の入力 */}
-              <div className="subcard" style={{ marginBottom: 24 }}>
-                <p style={{ margin: "8px 8px 12px", fontWeight: 700, color: "#1f2937", fontSize: 14 }}>
-                  今日は <b>{todayYmd || "(取得中…)"}</b>。{canEdit ? "23:59まで更新できます" : "本日の入力は締切済み（23:59）"}
-                </p>
-
-                {/* 入力 → ボタン を縦積み、Enter送信OK */}
-                <form
-                  className="stack"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!busy && coins !== "" && canEdit) submitCoins();
-                  }}
-                >
-                  <input
-                    className="input-left"
-                    placeholder="今日のコイン数を入力"
-                    value={coins}
-                    onChange={(e) => setCoins(e.target.value.replace(/[^\d]/g, ""))}
-                    inputMode="numeric"
-                    onKeyDown={onCoinsKeyDown}
-                    disabled={!canEdit}
-                    aria-label="今日のコイン数"
-                  />
-                  <button type="submit" className="btn-auto" disabled={busy || coins === "" || !canEdit}>
-                    保存
-                  </button>
-                </form>
-              </div>
-
-              <YearEndProjection todayYmd={todayYmd} baseCoins={latestCoins} defaultOpen={true} />
-
-              <RecentEditPanel
-                todayYmd={todayYmd}
-                canEditToday={canEdit}
-                allowPastEdits={allowPastEdits}
-                pastEditMaxDays={pastEditMaxDays}
-                onUpdated={async () => {
-                  await Promise.all([loadMy(), loadBoard()]);
-                }}
-              />
-            </div>
-          </div>
-
-          {/* マイページ内：履歴/ランキングタブ */}
-          <div className="tabs secondary" style={{ marginBottom: 16 }}>
-            <button className={`tab ${meTab === "history" ? "active" : ""}`} onClick={() => setMeTab("history")}>
-              自分の履歴
-            </button>
-            <button className={`tab ${meTab === "leaderboard" ? "active" : ""}`} onClick={() => setMeTab("leaderboard")}>
-              全体ランキング
-            </button>
-          </div>
-
-          {meTab === "history" ? (
-            <MyHistory rows={myHistory} endYmd={todayYmd || myHistory[0]?.date_ymd} />
-          ) : (
-            <div className="cap">
-              <div className="head--strong">
-                <h3 style={{ margin: 0 }}>全体ランキング</h3>
-              </div>
-              <div className="panel-body">
-                <Leaderboard
-                  boardTab={boardTab}
-                  setBoardTab={setBoardTab}
-                  board={board}
-                  boardDate={boardDate}
-                  isProvisional={isProvisional}
-                  stale={staleBoard}
-                />
-              </div>
-            </div>
-          )}
-        </>
+        <MyPageDashboard
+          displayName={displayName}
+          busy={busy}
+          todayYmd={todayYmd}
+          canEdit={canEdit}
+          myHistory={myHistory}
+          board={board}
+          boardTab={boardTab}
+          setBoardTab={setBoardTab}
+          boardDate={boardDate}
+          isProvisional={isProvisional}
+          staleBoard={staleBoard}
+          allowPastEdits={allowPastEdits}
+          pastEditMaxDays={pastEditMaxDays}
+          detailsOpen={detailsOpen}
+          setDetailsOpen={setDetailsOpen}
+          latestCoins={latestCoins}
+          onLogout={() => {
+            localStorage.removeItem("token");
+            setToken("");
+            localStorage.removeItem("displayName");
+            setDisplayName("");
+            setCoins("");
+            window.location.hash = "/";
+          }}
+          onNotifications={() => push("/notifications")}
+          onSubmitCoins={async (n, s, g = 0) => {
+            setBusy(true);
+            try {
+              const res = await api.postCoins(n, s, g);
+              if (res.error) {
+                toast.error(res.error);
+                return;
+              }
+              toast.success("保存しました");
+              await Promise.all([loadMy(), loadBoard(), loadEarned7dBoard()]);
+            } finally {
+              setBusy(false);
+            }
+          }}
+          onDataUpdated={async () => {
+            await Promise.all([loadMy(), loadBoard(), loadEarned7dBoard()]);
+          }}
+        />
       )}
 
       {/* ---------- /notifications ---------- */}
       {route === "/notifications" && loggedIn && (
         <>
-          <div style={{ marginBottom: 16 }}>
-            <button className="ghost" onClick={() => push("/me")}>
+          <div className="mb-4">
+            <Button variant="ghost" onClick={() => push("/me")}>
               ← マイページに戻る
-            </button>
+            </Button>
           </div>
           <NotificationSettings />
         </>
@@ -467,89 +484,121 @@ function SignupCard({ busy, onSubmit, onBack }) {
   const [n, setN] = useState("");
   const [p, setP] = useState("");
   return (
-    <div className="card">
-      <h2>新規登録</h2>
-      <div className="field">
-        <label>名前</label>
-        <input placeholder="名前" value={n} onChange={(e) => setN(e.target.value)} />
+    <Card className="p-4">
+      <h2 className="text-lg font-bold mb-4">新規登録</h2>
+      <div className="space-y-1">
+        <Label>名前</Label>
+        <Input placeholder="名前" value={n} onChange={(e) => setN(e.target.value)} />
       </div>
-      <div className="field">
-        <label>PIN（4桁以上）</label>
-        <input placeholder="PIN(4桁以上)" type="password" inputMode="numeric" value={p} onChange={(e) => setP(e.target.value)} />
+      <div className="space-y-1">
+        <Label>PIN（4桁以上）</Label>
+        <Input
+          placeholder="PIN(4桁以上)"
+          type="password"
+          inputMode="numeric"
+          value={p}
+          onChange={(e) => setP(e.target.value)}
+        />
       </div>
-      <div className="row">
-        <button disabled={busy || !n.trim() || p.trim().length < 4} onClick={() => onSubmit(n, p)}>
+      <div className="flex gap-2 flex-wrap mt-4">
+        <Button disabled={busy || !n.trim() || p.trim().length < 4} onClick={() => onSubmit(n, p)}>
           登録する
-        </button>
-        <button className="ghost" disabled={busy} onClick={onBack}>
+        </Button>
+        <Button variant="ghost" disabled={busy} onClick={onBack}>
           戻る
-        </button>
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
 /* =========================
    RecentEditPanel（折りたたみ＆過去編集）
-   ※軽量のためローカル定義のまま
    ========================= */
-function RecentEditPanel({ todayYmd, canEditToday, allowPastEdits = false, pastEditMaxDays = 0, onUpdated, defaultOpen = false }) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-  const [recentMap, setRecentMap] = useState(new Map()); // date_ymd -> {coins}
-  const [editing, setEditing] = useState(null);          // { date }
+function RecentEditPanel({
+  todayYmd,
+  canEditToday,
+  allowPastEdits = false,
+  pastEditMaxDays = 0,
+  onUpdated,
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [recentMap, setRecentMap] = useState(new Map());
+  const [editing, setEditing] = useState(null);
   const [newCoins, setNewCoins] = useState("");
+  const [newSpent, setNewSpent] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
-  // 今日（基準日）
   const fallbackToday = new Date().toISOString().slice(0, 10);
   const baseToday = /^\d{4}-\d{2}-\d{2}$/.test(todayYmd || "") ? todayYmd : fallbackToday;
 
-  // 直近7日（今日～6日前）
-  const last7 = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(baseToday, -i)), [baseToday]);
+  const last7 = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(baseToday, -i)),
+    [baseToday]
+  );
 
-  // 読み込み
   const load = async () => {
     try {
       const r = await api.myLatest(60);
       const m = new Map();
       (Array.isArray(r) ? r : []).forEach((row) => {
-        if (row?.date_ymd) m.set(row.date_ymd, { coins: Number(row.coins) || 0 });
+        if (row?.date_ymd)
+          m.set(row.date_ymd, {
+            coins: Number(row.coins) || 0,
+            spent: Number(row.spent) || 0,
+          });
       });
       setRecentMap(m);
     } catch {
       setRecentMap(new Map());
     }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const daysDiff = (a, b) => Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
+  const daysDiff = (a, b) =>
+    Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
 
   const isEditable = (ymd) => {
     if (ymd === baseToday) return canEditToday;
     if (!allowPastEdits) return false;
-    if (!pastEditMaxDays) return true; // 0=無制限
+    if (!pastEditMaxDays) return true;
     return Math.abs(daysDiff(ymd, baseToday)) <= pastEditMaxDays;
   };
 
-  const startEdit = (date, coins) => {
+  const startEdit = (date, coins, spent) => {
     setEditing({ date });
     setNewCoins(coins != null ? String(coins) : "");
+    setNewSpent(spent != null ? String(spent) : "0");
     setErr("");
   };
-  const cancel = () => { setEditing(null); setNewCoins(""); setErr(""); };
+  const cancel = () => {
+    setEditing(null);
+    setNewCoins("");
+    setNewSpent("");
+    setErr("");
+  };
 
   const save = async () => {
     const n = Number(newCoins);
-    if (!Number.isInteger(n) || n < 0) { setErr("0以上の整数で入力してね"); return; }
+    const s = Number(newSpent || 0);
+    if (!Number.isInteger(n) || n < 0) {
+      setErr("コイン数は0以上の整数で入力してね");
+      return;
+    }
+    if (!Number.isInteger(s) || s < 0) {
+      setErr("使った額は0以上の整数で入力してね");
+      return;
+    }
     setBusy(true);
     try {
-      await api.patchCoins(editing.date, n); // upsert想定
+      await api.patchCoins(editing.date, n, s);
       cancel();
       await load();
       onUpdated?.();
     } catch (e) {
-      // エラーメッセージを日本語化
       const errMsg = e.message || "";
       if (errMsg.includes("finalized")) {
         setErr("この日はすでに締め切られています");
@@ -568,79 +617,130 @@ function RecentEditPanel({ todayYmd, canEditToday, allowPastEdits = false, pastE
   };
 
   return (
-    <div className="cap" style={{ marginBottom: 16 }}>
-      <div
-        className="head--strong"
-        style={{ cursor: "pointer", userSelect: "none" }}
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* ヘッダー */}
+      <button
         onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-between w-full px-4 py-3 border-b border-border hover:bg-muted/50 transition-colors"
       >
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <span className="chev">▶</span>
-            <h3 style={{ margin: 0 }}>直近の記録（修正・追加）</h3>
-          </div>
-          <div className="muted">
-            直近7日（{last7[last7.length - 1]} ～ {last7[0]}）を表示
-          </div>
+        <h3 className="font-semibold text-sm flex items-center gap-2">
+          <Edit3 className="w-4 h-4 text-muted-foreground" />
+          直近の記録（修正・追加）
+        </h3>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {last7[last7.length - 1]} ～ {last7[0]}
+          </span>
+          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
         </div>
-      </div>
+      </button>
 
       {isOpen && (
-        <div className="panel-body">
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {last7.map((d) => {
-              const rec = recentMap.get(d);
-              const editable = isEditable(d);
-              const isEditing = editing?.date === d;
-              return (
-                <li
-                  key={d}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: "12px 0",
-                    borderBottom: "1px solid #e5e7eb",
-                    flexWrap: "wrap"
-                  }}
-                >
-                  <span style={{ fontWeight: 700, color: "#334155", minWidth: 100 }}>{d}</span>
+        <div className="p-4 space-y-2">
+          {last7.map((d) => {
+            const rec = recentMap.get(d);
+            const editable = isEditable(d);
+            const isEditingThis = editing?.date === d;
+            const isToday = d === baseToday;
 
-                  {isEditing ? (
-                    <>
-                      <input
-                        value={newCoins}
-                        onChange={(e) => setNewCoins(e.target.value.replace(/[^\d]/g, ""))}
-                        inputMode="numeric"
-                        placeholder="0"
-                        style={{ width: 140 }}
-                      />
-                      <button disabled={busy} onClick={save}>保存</button>
-                      <button className="ghost" disabled={busy} onClick={cancel}>キャンセル</button>
-                      {err && <span style={{ color: "#ef4444", fontSize: 12 }}>{err}</span>}
-                    </>
+            return (
+              <div
+                key={d}
+                className={`rounded-lg p-3 transition-colors ${
+                  isToday
+                    ? "bg-gradient-to-r from-indigo-50 to-violet-50 dark:from-indigo-950/30 dark:to-violet-950/30 border border-indigo-200 dark:border-indigo-800"
+                    : "border border-border"
+                }`}
+              >
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <Calendar className={`w-4 h-4 ${isToday ? "text-indigo-500" : "text-muted-foreground"}`} />
+                    <span className={`font-semibold text-sm ${isToday ? "text-indigo-600 dark:text-indigo-400" : ""}`}>
+                      {d}
+                      {isToday && <span className="ml-1 text-xs">(今日)</span>}
+                    </span>
+                  </div>
+
+                  {isEditingThis ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex gap-2 items-center flex-wrap">
+                        <label className="flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground">コイン</span>
+                          <Input
+                            value={newCoins}
+                            onChange={(e) => setNewCoins(e.target.value.replace(/[^\d]/g, ""))}
+                            inputMode="numeric"
+                            placeholder="0"
+                            className="w-24 h-8 my-0"
+                          />
+                        </label>
+                        <label className="flex items-center gap-1">
+                          <span className="text-xs text-muted-foreground">使用</span>
+                          <Input
+                            value={newSpent}
+                            onChange={(e) => setNewSpent(e.target.value.replace(/[^\d]/g, ""))}
+                            inputMode="numeric"
+                            placeholder="0"
+                            className="w-20 h-8 my-0"
+                          />
+                        </label>
+                      </div>
+                      <Button size="sm" className="h-8" disabled={busy} onClick={save}>
+                        保存
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-8" disabled={busy} onClick={cancel}>
+                        取消
+                      </Button>
+                    </div>
                   ) : (
-                    <>
+                    <div className="flex items-center gap-3">
                       {rec ? (
                         <>
-                          <b style={{ color: "#111827" }}>{Number(rec.coins).toLocaleString()} 枚</b>
-                          <button className="ghost" disabled={!editable} onClick={() => startEdit(d, rec.coins)}>
-                            編集
-                          </button>
+                          <div className="text-right">
+                            <span className="font-bold text-base tabular-nums">
+                              {Number(rec.coins).toLocaleString()}
+                            </span>
+                            <span className="text-xs text-muted-foreground ml-1">枚</span>
+                            {rec.spent > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                使用: {Number(rec.spent).toLocaleString()}
+                              </div>
+                            )}
+                          </div>
+                          {editable && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-xs"
+                              onClick={() => startEdit(d, rec.coins, rec.spent)}
+                            >
+                              <Edit3 className="w-3 h-3 mr-1" />
+                              編集
+                            </Button>
+                          )}
                         </>
                       ) : (
                         <>
-                          <span style={{ color: "#9ca3af" }}>未登録</span>
-                          <button disabled={!editable} onClick={() => startEdit(d, "")}>追加</button>
+                          <span className="text-sm text-muted-foreground">未登録</span>
+                          {editable && (
+                            <Button size="sm" className="h-8 text-xs" onClick={() => startEdit(d, "", 0)}>
+                              追加
+                            </Button>
+                          )}
                         </>
                       )}
-                      {!editable && <span style={{ fontSize: 12, color: "#9ca3af" }}>（この日は変更不可の設定）</span>}
-                    </>
+                      {!editable && !rec && (
+                        <span className="text-xs text-muted-foreground">(編集不可)</span>
+                      )}
+                    </div>
                   )}
-                </li>
-              );
-            })}
-          </ul>
+                </div>
+                {isEditingThis && err && (
+                  <p className="text-destructive text-xs mt-2">{err}</p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -648,22 +748,223 @@ function RecentEditPanel({ todayYmd, canEditToday, allowPastEdits = false, pastE
 }
 
 /* =========================
-   YearEndProjection（年末までの試算）
+   MyPageDashboard（マイページ ダッシュボード）
    ========================= */
-function YearEndProjection({ todayYmd, baseCoins, defaultOpen = false }) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
+function MyPageDashboard({
+  displayName,
+  busy,
+  todayYmd,
+  canEdit,
+  myHistory,
+  board,
+  boardTab,
+  setBoardTab,
+  boardDate,
+  isProvisional,
+  staleBoard,
+  allowPastEdits,
+  pastEditMaxDays,
+  detailsOpen,
+  setDetailsOpen,
+  latestCoins,
+  onLogout,
+  onNotifications,
+  onSubmitCoins,
+  onDataUpdated,
+}) {
+  // KPI計算用のヘルパー
+  const addDaysLocal = (ymd, n) => {
+    const [y, m, d] = ymd.split("-").map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    dt.setUTCDate(dt.getUTCDate() + n);
+    return dt.toISOString().slice(0, 10);
+  };
 
-  // 既定値 50,000。ユーザー変更は保存
+  const end = todayYmd || myHistory[0]?.date_ymd || "";
+
+  // KPI計算
+  const { dailyDiff, sum7, sum30 } = useMemo(() => {
+    const sumDiffsWindow = (N) => {
+      if (!end) return 0;
+      const start = addDaysLocal(end, -(N - 1));
+      return myHistory
+        .filter((r) => r.date_ymd >= start && r.date_ymd <= end)
+        .reduce((acc, r) => acc + Number(r.diff || 0), 0);
+    };
+
+    return {
+      dailyDiff: Number(myHistory[0]?.diff ?? 0),
+      sum7: sumDiffsWindow(7),
+      sum30: sumDiffsWindow(30),
+    };
+  }, [myHistory, end]);
+
+  // 年末予測用の平均稼ぎ（localStorageと連動）
   const [avgPerDay, setAvgPerDay] = useState(() => {
     const v = Number(localStorage.getItem("avgPerDay") || 50000);
     return Number.isFinite(v) && v >= 0 ? v : 50000;
   });
-  useEffect(() => { localStorage.setItem("avgPerDay", String(avgPerDay)); }, [avgPerDay]);
+  const handleChangeAvg = (v) => {
+    setAvgPerDay(v);
+    localStorage.setItem("avgPerDay", String(v));
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* ヘッダー */}
+      <header className="flex justify-between items-center gap-3 flex-wrap">
+        <p className="text-muted-foreground">
+          ようこそ <b className="text-foreground">{displayName || "ゲスト"}</b> さん
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={busy}
+            onClick={onNotifications}
+            title="通知設定"
+          >
+            <Settings className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={busy}
+            onClick={onLogout}
+            title="ログアウト"
+          >
+            <LogOut className="h-5 w-5" />
+          </Button>
+        </div>
+      </header>
+
+      {/* KPIカード（2x2グリッド） */}
+      <KPICard
+        currentCoins={latestCoins}
+        dailyDiff={dailyDiff}
+        sum7={sum7}
+        sum30={sum30}
+      />
+
+      {/* 年末予測（コンパクト表示） */}
+      <YearEndMini
+        todayYmd={todayYmd}
+        baseCoins={latestCoins}
+        avgPerDay={avgPerDay}
+        onChangeAvg={handleChangeAvg}
+      />
+
+      {/* 今日の入力CTA */}
+      <QuickInput
+        todayYmd={todayYmd}
+        canEdit={canEdit}
+        busy={busy}
+        latestCoins={latestCoins}
+        onSubmit={onSubmitCoins}
+      />
+
+      {/* ミニチャート */}
+      <MiniChart
+        data={myHistory}
+        onExpand={() => {
+          setDetailsOpen(true);
+          setTimeout(() => {
+            document.getElementById("history-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 150);
+        }}
+      />
+
+      {/* ランキングプレビュー */}
+      <RankingPreview
+        myName={displayName}
+        board={board}
+        periodDays={7}
+        periodEnd={todayYmd}
+        onViewFull={() => {
+          setDetailsOpen(true);
+          setTimeout(() => {
+            document.getElementById("ranking-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }, 150);
+        }}
+      />
+
+      {/* 詳細セクション（折りたたみ） */}
+      <Collapsible id="details-section" open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            variant="outline"
+            className="w-full justify-between h-12"
+          >
+            <span className="flex items-center gap-2">
+              <ChevronDown className={`h-4 w-4 transition-transform ${detailsOpen ? "rotate-180" : ""}`} />
+              詳細を表示
+            </span>
+            <span className="text-xs text-muted-foreground">
+              予測設定・履歴編集・全ランキング
+            </span>
+          </Button>
+        </CollapsibleTrigger>
+
+        <CollapsibleContent className="space-y-4 mt-4">
+          {/* 年末予測 */}
+          <YearEndProjection todayYmd={todayYmd} baseCoins={latestCoins} />
+
+          {/* 過去の記録編集 */}
+          <RecentEditPanel
+            todayYmd={todayYmd}
+            canEditToday={canEdit}
+            allowPastEdits={allowPastEdits}
+            pastEditMaxDays={pastEditMaxDays}
+            onUpdated={onDataUpdated}
+          />
+
+          {/* 自分の履歴 */}
+          <div id="history-section">
+            <MyHistory rows={myHistory} endYmd={todayYmd || myHistory[0]?.date_ymd} />
+          </div>
+
+          {/* 全体ランキング */}
+          <div id="ranking-section" className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
+              <Trophy className="w-4 h-4 text-muted-foreground" />
+              <h3 className="font-semibold text-sm">全体ランキング</h3>
+            </div>
+            <div className="p-4">
+              <Leaderboard
+                boardTab={boardTab}
+                setBoardTab={setBoardTab}
+                board={board}
+                boardDate={boardDate}
+                isProvisional={isProvisional}
+                stale={staleBoard}
+              />
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}
+
+/* =========================
+   YearEndProjection（年末までの試算）
+   ========================= */
+function YearEndProjection({ todayYmd, baseCoins }) {
+  const [isOpen, setIsOpen] = useState(true);
+
+  const [avgPerDay, setAvgPerDay] = useState(() => {
+    const v = Number(localStorage.getItem("avgPerDay") || 50000);
+    return Number.isFinite(v) && v >= 0 ? v : 50000;
+  });
+  useEffect(() => {
+    localStorage.setItem("avgPerDay", String(avgPerDay));
+  }, [avgPerDay]);
 
   const today = todayYmd || new Date().toISOString().slice(0, 10);
   const end = `${today.slice(0, 4)}-12-31`;
 
-  const daysDiff = (a, b) => Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
+  const daysDiff = (a, b) =>
+    Math.floor((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
   const remainDays = Math.max(0, daysDiff(today, end) + 1);
 
   const additional = avgPerDay * remainDays;
@@ -672,54 +973,58 @@ function YearEndProjection({ todayYmd, baseCoins, defaultOpen = false }) {
   const fmt = (n) => Number(n).toLocaleString();
 
   return (
-    <div className="cap" style={{ marginBottom: 16 }}>
-      <div
-        className="head--strong"
-        style={{ cursor: "pointer", userSelect: "none" }}
+    <div className="bg-card border border-border rounded-xl overflow-hidden">
+      {/* ヘッダー */}
+      <button
         onClick={() => setIsOpen(!isOpen)}
+        className="flex items-center justify-between w-full px-4 py-3 border-b border-border hover:bg-muted/50 transition-colors"
       >
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-          <div className="row" style={{ gap: 8, alignItems: "center" }}>
-            <span className="chev">▶</span>
-            <h3 style={{ margin: 0 }}>年末までの試算</h3>
-          </div>
-          <div className="muted">
-            目安: 平均 {fmt(avgPerDay)} 枚/日・残り {fmt(remainDays)} 日
-          </div>
+        <h3 className="font-semibold text-sm flex items-center gap-2">
+          <Target className="w-4 h-4 text-muted-foreground" />
+          年末予測の設定
+        </h3>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            1日の平均を調整
+          </span>
+          <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
         </div>
-      </div>
+      </button>
 
       {isOpen && (
-        <div className="panel-body">
-          <div className="row" style={{ gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="muted">平均</span>
-              <input
+        <div className="p-4 space-y-4">
+          {/* 入力エリア */}
+          <div className="flex items-center gap-3 flex-wrap border border-border rounded-lg p-3">
+            <label className="flex items-center gap-2">
+              <span className="text-muted-foreground text-sm">平均</span>
+              <Input
                 value={avgPerDay}
                 onChange={(e) => setAvgPerDay(Number(e.target.value.replace(/[^\d]/g, "") || 0))}
                 inputMode="numeric"
-                style={{ width: 140, textAlign: "right" }}
+                className="w-28 text-right h-9 my-0 font-bold"
               />
-              <span className="muted">枚 / 日</span>
+              <span className="text-muted-foreground text-sm">枚/日</span>
             </label>
-            <span style={{ color: "#cbd5e1" }}>｜</span>
-            <span>
-              残り日数（今日含む）：<b>{fmt(remainDays)}</b> 日
-            </span>
+            <div className="h-4 w-px bg-border" />
+            <div className="flex items-center gap-1 text-sm">
+              <Calendar className="w-4 h-4 text-muted-foreground" />
+              残り <b className="text-foreground">{fmt(remainDays)}</b> 日
+            </div>
           </div>
 
-          <div className="kpi-grid">
-            <div className="kpi">
-              <div className="label">いまのコイン</div>
-              <div className="value">{fmt(baseCoins)} 枚</div>
+          {/* KPIカード風の3カラム */}
+          <div className="grid grid-cols-3 gap-2">
+            <div className="border border-border rounded-xl p-3 min-h-[80px] flex flex-col justify-between">
+              <div className="text-muted-foreground text-xs">いまのコイン</div>
+              <div className="text-lg font-black tabular-nums">{fmt(baseCoins)}</div>
             </div>
-            <div className="kpi">
-              <div className="label">見込み追加（年末まで）</div>
-              <div className="value">{fmt(additional)} 枚</div>
+            <div className="border border-border rounded-xl p-3 min-h-[80px] flex flex-col justify-between">
+              <div className="text-muted-foreground text-xs">見込み追加</div>
+              <div className="text-lg font-black tabular-nums text-success">+{fmt(additional)}</div>
             </div>
-            <div className="kpi">
-              <div className="label">12/31 見込み合計</div>
-              <div className="value" style={{ color: "var(--brand-500)" }}>{fmt(projected)} 枚</div>
+            <div className="bg-gradient-to-br from-indigo-50 to-violet-50 dark:from-indigo-950/50 dark:to-violet-950/50 border border-indigo-200 dark:border-indigo-800 rounded-xl p-3 min-h-[80px] flex flex-col justify-between">
+              <div className="text-indigo-600 dark:text-indigo-400 text-xs font-medium">12/31 予測</div>
+              <div className="text-xl font-black tabular-nums text-indigo-600 dark:text-indigo-400">{fmt(projected)}</div>
             </div>
           </div>
         </div>

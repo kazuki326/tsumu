@@ -1,6 +1,12 @@
 // src/NotificationSettings.jsx
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { api } from "./api";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 export default function NotificationSettings() {
   const [supported, setSupported] = useState(false);
@@ -65,14 +71,14 @@ export default function NotificationSettings() {
       setPermission(perm);
 
       if (perm !== "granted") {
-        alert("通知の許可が必要です");
+        toast.error("通知の許可が必要です");
         return;
       }
 
       // VAPID公開鍵取得
       const vapidRes = await api.getVapidPublicKey();
       if (vapidRes.error) {
-        alert("VAPIDキーの取得に失敗しました");
+        toast.error("VAPIDキーの取得に失敗しました");
         return;
       }
 
@@ -95,15 +101,15 @@ export default function NotificationSettings() {
       });
 
       if (res.error) {
-        alert(`購読に失敗しました: ${res.error}`);
+        toast.error(`購読に失敗しました: ${res.error}`);
         return;
       }
 
       setSubscription(sub);
-      alert("プッシュ通知を有効にしました");
+      toast.success("プッシュ通知を有効にしました");
     } catch (e) {
       console.error("[subscribe error]", e);
-      alert(`エラーが発生しました: ${e.message}`);
+      toast.error(`エラーが発生しました: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -117,10 +123,10 @@ export default function NotificationSettings() {
       await api.unsubscribeNotifications(subscription.endpoint);
       await subscription.unsubscribe();
       setSubscription(null);
-      alert("プッシュ通知を無効にしました");
+      toast.success("プッシュ通知を無効にしました");
     } catch (e) {
       console.error("[unsubscribe error]", e);
-      alert(`エラーが発生しました: ${e.message}`);
+      toast.error(`エラーが発生しました: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -132,13 +138,13 @@ export default function NotificationSettings() {
     try {
       const res = await api.updateNotificationSettings(settings);
       if (res.error) {
-        alert(`設定の保存に失敗しました: ${res.error}`);
+        toast.error(`設定の保存に失敗しました: ${res.error}`);
         return;
       }
-      alert("設定を保存しました");
+      toast.success("設定を保存しました");
     } catch (e) {
       console.error("[update settings error]", e);
-      alert(`エラーが発生しました: ${e.message}`);
+      toast.error(`エラーが発生しました: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -150,13 +156,13 @@ export default function NotificationSettings() {
     try {
       const res = await api.testNotification();
       if (res.error) {
-        alert(`テスト通知の送信に失敗しました: ${res.error}`);
+        toast.error(`テスト通知の送信に失敗しました: ${res.error}`);
         return;
       }
-      alert(`テスト通知を送信しました (成功: ${res.sent}, 失敗: ${res.failed})`);
+      toast.success(`テスト通知を送信しました (成功: ${res.sent}, 失敗: ${res.failed})`);
     } catch (e) {
       console.error("[test notification error]", e);
-      alert(`エラーが発生しました: ${e.message}`);
+      toast.error(`エラーが発生しました: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -169,37 +175,37 @@ export default function NotificationSettings() {
       || window.navigator.standalone === true;
 
     return (
-      <div className="card">
-        <h2>通知設定</h2>
-        <p className="muted">
+      <Card className="p-4">
+        <h2 className="text-lg font-bold mb-4">通知設定</h2>
+        <p className="text-muted-foreground text-sm">
           お使いのブラウザはプッシュ通知に対応していません。
         </p>
         {isIOS && !isInStandaloneMode && (
-          <div className="ios-notice">
-            <strong>📱 iPhoneでプッシュ通知を使うには：</strong>
-            <ol>
+          <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-950 rounded-xl text-sm">
+            <strong className="block mb-2">iPhoneでプッシュ通知を使うには：</strong>
+            <ol className="list-decimal ml-5 space-y-1">
               <li>Safari の共有ボタン（↑）をタップ</li>
               <li>「ホーム画面に追加」を選択</li>
               <li>追加したアプリアイコンから起動</li>
               <li>この画面で通知を有効にする</li>
             </ol>
-            <p className="muted" style={{ marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+            <p className="text-muted-foreground text-xs mt-2">
               ※ iOS 16.4 以降が必要です
             </p>
           </div>
         )}
-      </div>
+      </Card>
     );
   }
 
   return (
-    <div className="card">
-      <h2>通知設定</h2>
+    <Card className="p-4">
+      <h2 className="text-lg font-bold mb-4">通知設定</h2>
 
       {/* プッシュ通知セクション */}
-      <div className="notification-section">
-        <h3>プッシュ通知</h3>
-        <div className="notification-status">
+      <div className="mb-6">
+        <h3 className="text-base font-bold mb-3">プッシュ通知</h3>
+        <div className="flex flex-wrap gap-4 text-sm mb-3">
           <span>ステータス: <strong>{subscription ? "有効" : "無効"}</strong></span>
           <span>権限: <strong>
             {permission === "granted" ? "許可済み" : permission === "denied" ? "拒否" : "未設定"}
@@ -207,60 +213,48 @@ export default function NotificationSettings() {
         </div>
 
         {!subscription ? (
-          <button disabled={loading} onClick={handleSubscribe}>
+          <Button disabled={loading} onClick={handleSubscribe}>
             プッシュ通知を有効にする
-          </button>
+          </Button>
         ) : (
-          <div className="notification-buttons">
-            <button disabled={loading} onClick={handleTestNotification}>
+          <div className="flex flex-col md:flex-row gap-2">
+            <Button disabled={loading} onClick={handleTestNotification}>
               テスト通知を送信
-            </button>
-            <button
-              className="ghost"
+            </Button>
+            <Button
+              variant="ghost"
               disabled={loading}
               onClick={handleUnsubscribe}
             >
               プッシュ通知を無効にする
-            </button>
+            </Button>
           </div>
         )}
       </div>
 
       {/* 通知タイミングセクション */}
-      <div className="notification-section">
-        <h3>通知タイミング</h3>
+      <div className="mb-6">
+        <h3 className="text-base font-bold mb-3">通知タイミング</h3>
 
-        <div className="toggle-label">
-          <span className="toggle-label-text">日次リマインダーを受け取る</span>
-          <label className="toggle-switch">
-            <input
-              type="checkbox"
-              checked={settings.daily_reminder}
-              onChange={(e) =>
-                setSettings({ ...settings, daily_reminder: e.target.checked })
-              }
-            />
-            <span className="toggle-slider"></span>
-          </label>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <Label className="flex-1 font-semibold">日次リマインダーを受け取る</Label>
+          <Switch
+            checked={settings.daily_reminder}
+            onCheckedChange={(checked) =>
+              setSettings({ ...settings, daily_reminder: checked })
+            }
+          />
         </div>
 
         {settings.daily_reminder && (
-          <div className="time-input-wrapper">
-            <label>通知時刻</label>
+          <div className="bg-secondary/50 rounded-xl p-3 mb-3">
+            <Label className="block text-sm text-muted-foreground mb-2">通知時刻</Label>
             <select
               value={settings.reminder_time}
               onChange={(e) =>
                 setSettings({ ...settings, reminder_time: e.target.value })
               }
-              style={{
-                width: '100%',
-                maxWidth: '200px',
-                padding: '10px',
-                fontSize: '16px',
-                borderRadius: '12px',
-                border: '1px solid #e6e8f0',
-                margin: 0
-              }}
+              className="w-full max-w-[200px] px-3 py-2 text-base rounded-xl border border-input bg-background"
             >
               <option value="18:00">18:00 (午後6時)</option>
               <option value="19:00">19:00 (午後7時)</option>
@@ -273,21 +267,21 @@ export default function NotificationSettings() {
           </div>
         )}
 
-        <button
+        <Button
           disabled={loading}
           onClick={handleUpdateSettings}
-          style={{ marginTop: 12, width: '100%' }}
+          className="w-full"
         >
           設定を保存
-        </button>
+        </Button>
       </div>
 
-      <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
-        💡 日次リマインダーで「今日のコインを記録しましょう」と通知されます。
+      <p className="text-muted-foreground text-xs mt-4">
+        日次リマインダーで「今日のコインを記録しましょう」と通知されます。
         <br />
-        📱 iOSの場合: ホーム画面に追加（PWA）してから通知を有効にしてください（iOS 16.4+）
+        iOSの場合: ホーム画面に追加（PWA）してから通知を有効にしてください（iOS 16.4+）
       </p>
-    </div>
+    </Card>
   );
 }
 

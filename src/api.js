@@ -33,19 +33,19 @@ export const api = {
     });
   },
 
-  async postCoins(coins) {
+  async postCoins(coins, spent = 0, gacha = 0) {
     return req("/api/coins", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeader() },
-      body: JSON.stringify({ coins })
+      body: JSON.stringify({ coins, spent, gacha })
     });
   },
 
-  async patchCoins(date_ymd, coins) {
+  async patchCoins(date_ymd, coins, spent = 0, gacha = 0) {
     return req(`/api/coins/${date_ymd}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json", ...authHeader() },
-      body: JSON.stringify({ coins })
+      body: JSON.stringify({ coins, spent, gacha })
     });
   },
 

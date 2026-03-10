@@ -1,11 +1,11 @@
 // src/components/Leaderboard.jsx
-// 全体ランキング：タブ4種のみ（コイン数/前日比/7日/30日）
-// ・コイン数タブは「グラフ無し」＝スナップショットの棒バーのみ
-// ・その他タブは「上：折れ線グラフ／下：スナップショットの棒バー」
-// ・グラフ内の点をクリックでツールチップ表示、背景クリックで閉じる
+// 全体ランキング：タブ5種（7日稼ぎ/コイン数/前日比/7日増減/30日増減）
 
 import { useEffect, useMemo, useState } from "react";
+import { Trophy, TrendingUp, Coins, Calendar, BarChart3 } from "lucide-react";
 import { api } from "../api";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 
 /* ========= public component ========= */
 export function Leaderboard({
@@ -25,6 +25,7 @@ export function Leaderboard({
 
   // boardSeries のパラメータ
   const seriesParams = useMemo(() => {
+    if (boardTab === "earned7d") return { mode: "earned", periodDays: 7, days: 28, top: 5, date: boardDate };
     if (boardTab === "daily") return { mode: "daily", days: 14, top: 5, date: boardDate };
     if (boardTab === "7d")    return { mode: "period", periodDays: 7,  days: 28, top: 5, date: boardDate };
     if (boardTab === "30d")   return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate };
@@ -48,52 +49,102 @@ export function Leaderboard({
   }, [seriesParams]);
 
   return (
-    <div>
-      {/* ステータス行（右側ステータスのみ） */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 }}>
-        <div style={{ fontSize: 13, color: "var(--muted)" }}>
-          {stale && <span>更新中...</span>}
+    <div className="space-y-4">
+      {/* ステータス */}
+      {stale && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground border border-border rounded-lg px-3 py-2">
+          <div className="animate-spin w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full" />
+          更新中...
         </div>
-      </div>
-
-      {/* 指標タブ（4つのみ） */}
-      <div className="tabs" role="tablist" aria-label="ランキング指標の切り替え">
-        <button className={`tab ${boardTab === "raw" ? "active" : ""}`}   role="tab" aria-selected={boardTab==="raw"}   onClick={() => setBoardTab("raw")}>コイン数</button>
-        <button className={`tab ${boardTab === "daily" ? "active" : ""}`} role="tab" aria-selected={boardTab==="daily"} onClick={() => setBoardTab("daily")}>前日比</button>
-        <button className={`tab ${boardTab === "7d" ? "active" : ""}`}    role="tab" aria-selected={boardTab==="7d"}    onClick={() => setBoardTab("7d")}>7日間増減</button>
-        <button className={`tab ${boardTab === "30d" ? "active" : ""}`}   role="tab" aria-selected={boardTab==="30d"}   onClick={() => setBoardTab("30d")}>30日間増減</button>
-      </div>
-
-      {/* 本体 */}
-      {isRaw ? (
-        // コイン数タブ：スナップショットの棒バーのみ
-        <RankListAndBars data={board} unit={labelForTab(boardTab)} />
-      ) : (
-        <>
-          <div style={{ marginTop: 4 }}>
-            {loading ? (
-              <p className="muted">グラフを読み込み中…</p>
-            ) : series.length === 0 ? (
-              <p className="muted">グラフ用のデータがありません</p>
-            ) : (
-              <LineChartWithDismiss series={series} unit={labelForTab(boardTab)} />
-            )}
-          </div>
-
-          {/* スナップショット棒バー（下） */}
-          <div className="subcard" style={{ marginTop: 16 }}>
-            <h4 style={{ margin: "0 0 8px 0", fontSize: 14, color: "var(--muted)" }}>
-              ランキング（現時点スナップショット）
-            </h4>
-            <RankListAndBars data={board} unit={labelForTab(boardTab)} />
-          </div>
-        </>
       )}
 
-      <p className="muted" style={{ marginTop: 16 }}>
+      {/* 指標タブ（5つ） */}
+      <Tabs value={boardTab} onValueChange={setBoardTab}>
+        <div className="overflow-x-auto -mx-1 px-1">
+          <TabsList className="w-full justify-start gap-1 h-auto p-1 border border-border bg-card">
+            <TabsTrigger value="earned7d" className="text-xs px-3 py-2 data-[state=active]:bg-card">
+              <Trophy className="w-3 h-3 mr-1" />
+              7日間稼ぎ
+            </TabsTrigger>
+            <TabsTrigger value="raw" className="text-xs px-3 py-2 data-[state=active]:bg-card">
+              <Coins className="w-3 h-3 mr-1" />
+              コイン数
+            </TabsTrigger>
+            <TabsTrigger value="daily" className="text-xs px-3 py-2 data-[state=active]:bg-card">
+              <TrendingUp className="w-3 h-3 mr-1" />
+              前日比
+            </TabsTrigger>
+            <TabsTrigger value="7d" className="text-xs px-3 py-2 data-[state=active]:bg-card">
+              <Calendar className="w-3 h-3 mr-1" />
+              7日間
+            </TabsTrigger>
+            <TabsTrigger value="30d" className="text-xs px-3 py-2 data-[state=active]:bg-card">
+              <Calendar className="w-3 h-3 mr-1" />
+              30日間
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        {/* コイン数タブ：スナップショットの棒バーのみ */}
+        <TabsContent value="raw" className="mt-4">
+          <div className="border border-border rounded-xl overflow-hidden">
+            <div className="px-4 py-2 border-b border-border">
+              <h4 className="text-sm font-semibold flex items-center gap-2">
+                <Coins className="w-4 h-4 text-muted-foreground" />
+                コイン数ランキング
+              </h4>
+            </div>
+            <div className="p-4">
+              <RankListAndBars data={board} unit={labelForTab("raw")} />
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* その他タブ：グラフ + スナップショット */}
+        {["earned7d", "daily", "7d", "30d"].map((tab) => (
+          <TabsContent key={tab} value={tab} className="mt-4 space-y-4">
+            {/* グラフ */}
+            <div className="bg-gradient-to-br from-indigo-50/50 to-violet-50/50 dark:from-indigo-950/30 dark:to-violet-950/30 rounded-xl p-4 border border-indigo-100 dark:border-indigo-900">
+              <div className="flex items-center gap-2 mb-3">
+                <BarChart3 className="w-4 h-4 text-indigo-500" />
+                <h4 className="text-sm font-semibold">トレンドグラフ</h4>
+              </div>
+              {loading ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
+                  <div className="animate-spin w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full mr-2" />
+                  読み込み中…
+                </div>
+              ) : series.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">グラフ用のデータがありません</p>
+              ) : (
+                <LineChartWithDismiss series={series} unit={labelForTab(tab)} />
+              )}
+            </div>
+
+            {/* スナップショット棒バー */}
+            <div className="border border-border rounded-xl overflow-hidden bg-card">
+              <div className="px-4 py-2 border-b border-border">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-muted-foreground" />
+                  ランキング（現時点）
+                </h4>
+              </div>
+              <div className="p-4">
+                <RankListAndBars data={board} unit={labelForTab(tab)} />
+              </div>
+            </div>
+          </TabsContent>
+        ))}
+      </Tabs>
+
+      {/* 基準日 */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground border border-border rounded-lg px-3 py-2">
+        <Calendar className="w-3 h-3" />
         基準日: {boardDate || "取得中…"}
-        {isProvisional ? "（今日・暫定）" : "（締切済み日の集計）"}
-      </p>
+        <span className={isProvisional ? "text-amber-600 dark:text-amber-400" : "text-success"}>
+          {isProvisional ? "（今日・暫定）" : "（締切済み）"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -101,6 +152,7 @@ export function Leaderboard({
 /* ========= sub components ========= */
 
 function labelForTab(tab) {
+  if (tab === "earned7d") return "枚（7日稼ぎ）";
   if (tab === "raw") return "枚";
   if (tab === "daily") return "枚（前日比）";
   if (tab === "7d") return "枚/7日";
@@ -108,34 +160,55 @@ function labelForTab(tab) {
   return "枚";
 }
 
+const MEDALS = ["🥇", "🥈", "🥉"];
+
 function RankListAndBars({ data, unit }) {
   const maxAbs = Math.max(1, ...data.map((d) => Math.abs(Number(d.value) || 0)));
+
+  if (data.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm text-center py-4">
+        まだデータがありません
+      </p>
+    );
+  }
+
   return (
-    <div className="rank-wrap">
-      <ol className="rank-list">
-        {data.map((b, i) => {
-          const val = Number(b.value) || 0;
-          const width = (Math.abs(val) / maxAbs) * 100;
-          const isPos = val >= 0;
-          return (
-            <li key={`${b.name}-${i}`}>
-              <span className="rank-name">
-                {i + 1}. {b.name}
-              </span>
-              <b className={`rank-value ${isPos ? "pos" : "neg"}`}>
-                {val.toLocaleString()} {unit}
-              </b>
-              <div className="bar">
-                <div
-                  className="bar-fill"
-                  style={{ width: `${width}%`, background: isPos ? undefined : "var(--ng)" }}
-                />
+    <div className="space-y-3">
+      {data.map((b, i) => {
+        const val = Number(b.value) || 0;
+        const width = (Math.abs(val) / maxAbs) * 100;
+        const isPos = val >= 0;
+        const isTop3 = i < 3;
+
+        return (
+          <div key={`${b.name}-${i}`}>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                {isTop3 ? (
+                  <span className="text-base">{MEDALS[i]}</span>
+                ) : (
+                  <span className="text-sm font-semibold text-muted-foreground w-5">{i + 1}.</span>
+                )}
+                <span className="font-medium text-sm">{b.name}</span>
               </div>
-            </li>
-          );
-        })}
-        {data.length === 0 && <li style={{ opacity: 0.6 }}>まだデータがありません</li>}
-      </ol>
+              <span className={`font-bold tabular-nums text-sm ${isPos ? "text-success" : "text-danger"}`}>
+                {isPos && val > 0 ? "+" : ""}{val.toLocaleString()} {unit}
+              </span>
+            </div>
+            {/* バー */}
+            <div className="h-2 bg-border/30 rounded-full overflow-hidden ml-7">
+              <div
+                className="h-full rounded-full transition-all duration-300"
+                style={{
+                  width: `${width}%`,
+                  background: isPos ? "var(--brand-600)" : "#ef4444"
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -143,24 +216,21 @@ function RankListAndBars({ data, unit }) {
 /* ========= chart (with click-away to dismiss tooltip) ========= */
 
 function LineChartWithDismiss({ series, unit }) {
-  // 背景クリックでツールチップを閉じるため、ここで保持
   const [tooltip, setTooltip] = useState(null);
   return (
     <div
-      className="chart-card"
-      style={{ width: "100%", overflowX: "auto", position: "relative" }}
-      onClick={() => setTooltip(null)} // ラッパークリックで閉じる
+      className="rounded-xl overflow-x-auto"
+      onClick={() => setTooltip(null)}
     >
       <LineChart series={series} unit={unit} tooltip={tooltip} setTooltip={setTooltip} />
-      <div className="muted" style={{ marginTop: 6 }}>
-        単位: {unit}
-        {tooltip && (
-          <span style={{ marginLeft: 12 }}>
-            • データポイントをクリックして詳細表示中
-            <button className="link" style={{ marginLeft: 6, fontSize: 12 }} onClick={() => setTooltip(null)}>
-              閉じる
-            </button>
-          </span>
+      <div className="flex items-center justify-between text-muted-foreground text-xs mt-3 px-1">
+        <span>単位: {unit}</span>
+        {tooltip ? (
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={() => setTooltip(null)}>
+            ツールチップを閉じる
+          </Button>
+        ) : (
+          <span>ポイントをタップで詳細</span>
         )}
       </div>
     </div>
@@ -194,9 +264,9 @@ function LineChart({ series, unit, tooltip, setTooltip }) {
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
-      style={{ width: "100%", height: "auto", background: "#fff", borderRadius: 10 }}
+      className="w-full h-auto rounded-lg"
+      style={{ background: "hsl(var(--card))" }}
       onClick={(e) => {
-        // SVG・軸・線など背景っぽい所をクリック → ツールチップ閉じる
         const tag = e.target.tagName.toLowerCase();
         if (tag === "svg" || tag === "line" || tag === "path" || tag === "rect") {
           setTooltip?.(null);
@@ -258,7 +328,7 @@ function LineChart({ series, unit, tooltip, setTooltip }) {
             strokeWidth="2"
             style={{ cursor: "pointer" }}
             onClick={(e) => {
-              e.stopPropagation(); // 背景クリック扱いにしない
+              e.stopPropagation();
               setTooltip?.({ x: x(i), y: y(p.value), date: p.date_ymd, name: s.name, value: p.value });
             }}
           />

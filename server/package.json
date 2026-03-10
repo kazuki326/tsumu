@@ -5,17 +5,20 @@
   "private": true,
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js",
+    "dev": "cross-env ALWAYS_OPEN=1 ALLOW_PAST_EDITS=1 node index.js",
+    "dev:strict": "node --watch index.js",
     "send-notifications": "node send-notifications.js",
     "seed": "node seed-local.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
     "dotenv": "^17.2.2",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "pg": "^8.16.3",
+    "tsumu-coins": "file:..",
     "web-push": "^3.6.7"
   },
   "optionalDependencies": {

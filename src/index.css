@@ -1,43 +1,157 @@
-/* src\index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root { --bg:#fff5fb; --card:#fff; --ink:#333; --accent:#ff6fa8; --accent2:#7fd7ff; }
-*{ box-sizing:border-box; }
-body{
-  margin:0; color:var(--ink);
-  font-family: "Noto Sans JP", system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background:
-    radial-gradient(#ffe2ee 2px, transparent 2px) 0 0/24px 24px,
-    radial-gradient(#e6f7ff 2px, transparent 2px) 12px 12px/24px 24px,
-    var(--bg);
+/* =========================
+   CSS Variables (Light/Dark)
+   ========================= */
+@layer base {
+  :root {
+    /* shadcn/ui semantic colors (HSL values without hsl()) */
+    --background: 244 100% 98%;
+    --foreground: 226 38% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 226 38% 15%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 244 100% 95%;
+    --secondary-foreground: 243 75% 59%;
+    --muted: 220 13% 46%;
+    --muted-foreground: 220 13% 46%;
+    --accent: 243 75% 59%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 226 71% 85%;
+    --input: 226 71% 85%;
+    --ring: 239 84% 67%;
+    --radius: 0.75rem;
+
+    /* Success/Danger セマンティックカラー */
+    --success: 160 84% 39%;
+    --success-light: 152 81% 96%;
+    --success-dark: 160 84% 30%;
+    --success-foreground: 160 84% 25%;
+    --danger: 0 84% 60%;
+    --danger-light: 0 86% 97%;
+    --danger-dark: 0 72% 51%;
+    --danger-foreground: 0 72% 35%;
+
+    /* Legacy variables for compatibility */
+    --bg: #f6f7ff;
+    --ink: #1c2240;
+    --ok: #15a46b;
+    --ng: #d33;
+    --brand-600: #4F46E5;
+    --brand-500: #6366F1;
+    --violet-500: #8B5CF6;
+    --accent-weak: #E5E7FF;
+  }
+
+  .dark {
+    --background: 229 38% 10%;
+    --foreground: 240 20% 94%;
+    --card: 230 45% 10%;
+    --card-foreground: 240 20% 94%;
+    --primary: 243 100% 73%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 230 43% 14%;
+    --secondary-foreground: 240 60% 90%;
+    --muted: 220 20% 60%;
+    --muted-foreground: 220 20% 60%;
+    --accent: 243 100% 73%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 230 40% 18%;
+    --input: 230 40% 18%;
+    --ring: 243 80% 70%;
+
+    /* Success/Danger セマンティックカラー（ダークモード） */
+    --success: 160 84% 45%;
+    --success-light: 160 30% 18%;
+    --success-dark: 160 84% 55%;
+    --success-foreground: 160 60% 70%;
+    --danger: 0 72% 55%;
+    --danger-light: 0 30% 18%;
+    --danger-dark: 0 72% 65%;
+    --danger-foreground: 0 60% 75%;
+
+    /* Legacy variables for dark mode */
+    --bg: #0f1221;
+    --ink: #e6e8f7;
+    --brand-600: #7a73ff;
+    --brand-500: #8a84ff;
+    --accent-weak: #141a34;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: "Noto Sans JP", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
 }
-.container{ max-width:980px; margin:32px auto; padding:0 16px; }
-h1{ font-size:40px; letter-spacing:2px; margin:0 0 16px; }
-.grid{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-.card{ background:var(--card); border-radius:16px; padding:16px; box-shadow:0 12px 28px rgba(0,0,0,.08); }
-input{ width:100%; padding:12px 14px; margin:8px 0; border:2px solid #eee; border-radius:12px; font-size:16px; }
-button{ padding:10px 16px; border:0; border-radius:999px; background:linear-gradient(135deg, var(--accent), var(--accent2)); color:#fff; font-weight:700; cursor:pointer; }
-button.ghost{ background:#eee; color:#333; margin-left:8px; }
-.row{ display:flex; gap:8px; flex-wrap:wrap; }
-table{ width:100%; border-collapse: collapse; }
-th, td{ padding:8px; border-bottom:1px solid #f0f0f0; }
-.pos{ color:#0a8f3a; }
-.neg{ color:#c02828; }
-ol{ margin:0; padding-left:20px; }
-ol li{ display:flex; justify-content:space-between; padding:6px 0; }
-footer{ margin-top:16px; opacity:.6; font-size:12px; }
-@media (max-width:800px){ .grid{ grid-template-columns:1fr; } }
 
+/* =========================
+   Background
+   ========================= */
+body {
+  background:
+    radial-gradient(40vw 40vw at 20% -10%, hsl(var(--secondary) / 0.5) 0%, transparent 60%),
+    radial-gradient(35vw 35vw at 100% 20%, hsl(var(--secondary) / 0.4) 0%, transparent 60%),
+    hsl(var(--background));
+}
 
-/* ==== 背景画像（上に淡いグラデ＋読みやすさ用の薄い白） ==== */
+/* Background image overlay */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -2;
   background:
-    linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.85)),
+    linear-gradient(180deg, hsl(var(--background) / 0.92), hsl(var(--background) / 0.92)),
     url("https://e0.pxfuel.com/wallpapers/958/622/desktop-wallpaper-tsum-header-tsum-tsum-background-disney-tsum-tsum.jpg")
       center/cover no-repeat fixed;
-  /* モバイルでのチラつき対策 */
   transform: translateZ(0);
+}
+
+/* =========================
+   Base Styles
+   ========================= */
+.container {
+  max-width: 980px;
+  margin: 32px auto;
+  padding: 0 16px;
+}
+
+/* Status colors */
+.pos { color: var(--ok); }
+.neg { color: var(--ng); }
+
+/* Tabular numbers for data */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* =========================
+   Legacy compatibility
+   ========================= */
+.muted {
+  @apply text-muted-foreground text-xs;
+  margin-top: 8px;
+}
+
+footer {
+  opacity: 0.6;
+  padding: 12px 2px;
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .grid:not(.grid-cols-2) {
+    grid-template-columns: 1fr;
+  }
 }

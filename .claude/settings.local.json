@@ -13,7 +13,21 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(taskkill /F /PID 26972)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(tree:*)",
+      "Bash(npm run seed:*)",
+      "Bash(npm run dev:*)",
+      "Bash(\"/c/Program Files/nodejs/npm\" run)",
+      "Bash(\"/c/Program Files/nodejs/node\" ./node_modules/.bin/vite build)",
+      "Bash(del \"C:\\\\Users\\\\poohs\\\\OneDrive\\\\デスクトップ\\\\TsumuTsumu\\\\tsumu\\\\src\\\\components\\\\Charts.jsx\")",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "Bash(npx vite:*)",
+      "Bash(node:*)",
+      "Bash(powershell -Command \"Stop-Process -Id 11104 -Force\")",
+      "Bash(powershell:*)",
+      "Bash(sqlite3:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

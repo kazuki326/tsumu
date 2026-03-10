@@ -41,6 +41,12 @@ const ALLOWLIST = [
   "https://kazuki326.github.io", // GitHub Pages
   "http://localhost:5173",
   "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
+  "http://localhost:5175",
+  "http://127.0.0.1:5175",
+  "http://localhost:5176",
+  "http://127.0.0.1:5176",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ];
@@ -124,9 +130,24 @@ if (USE_PG) {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       date_ymd DATE NOT NULL,
       coins INTEGER NOT NULL,
+      spent INTEGER NOT NULL DEFAULT 0,
+      gacha INTEGER NOT NULL DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       UNIQUE(user_id, date_ymd)
     );
+    -- 既存テーブルへのカラム追加（存在しない場合のみ）
+    DO $$ BEGIN
+      ALTER TABLE coin_logs ADD COLUMN spent INTEGER NOT NULL DEFAULT 0;
+    EXCEPTION WHEN duplicate_column THEN NULL;
+    END $$;
+    DO $$ BEGIN
+      ALTER TABLE coin_logs ADD COLUMN gacha INTEGER NOT NULL DEFAULT 0;
+    EXCEPTION WHEN duplicate_column THEN NULL;
+    END $$;
+
+    -- パフォーマンス向上用インデックス
+    CREATE INDEX IF NOT EXISTS idx_coin_logs_user_date ON coin_logs(user_id, date_ymd);
+    CREATE INDEX IF NOT EXISTS idx_coin_logs_user_date_desc ON coin_logs(user_id, date_ymd DESC);
 
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       id SERIAL PRIMARY KEY,
@@ -172,6 +193,8 @@ if (USE_PG) {
       user_id INTEGER NOT NULL,
       date_ymd TEXT NOT NULL,
       coins INTEGER NOT NULL,
+      spent INTEGER NOT NULL DEFAULT 0,
+      gacha INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       UNIQUE(user_id, date_ymd),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -196,6 +219,23 @@ if (USE_PG) {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+  `);
+  // 既存テーブルへの spent カラム追加（存在しない場合のみ）
+  try {
+    db.exec("ALTER TABLE coin_logs ADD COLUMN spent INTEGER NOT NULL DEFAULT 0");
+  } catch (e) {
+    // カラムが既に存在する場合は無視
+  }
+  // 既存テーブルへの gacha カラム追加（存在しない場合のみ）
+  try {
+    db.exec("ALTER TABLE coin_logs ADD COLUMN gacha INTEGER NOT NULL DEFAULT 0");
+  } catch (e) {
+    // カラムが既に存在する場合は無視
+  }
+  // パフォーマンス向上用インデックス
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_coin_logs_user_date ON coin_logs(user_id, date_ymd);
+    CREATE INDEX IF NOT EXISTS idx_coin_logs_user_date_desc ON coin_logs(user_id, date_ymd DESC);
   `);
 }
 
@@ -265,16 +305,20 @@ const auth = (req, res, next) => {
 app.get("/", (_req, res) => res.json({ ok: true }));
 
 // ステータス（今日/締切、過去編集ポリシー）
+// 開発用: ALWAYS_OPEN=1 で常に編集可能にする
+const ALWAYS_OPEN = process.env.ALWAYS_OPEN === "1";
+
 app.get("/api/status", (_req, res) => {
   const today = jstDateYMD();
   const now = jstNow();
-  const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
+  // ALWAYS_OPEN が true なら常に編集可能
+  const canEditToday = ALWAYS_OPEN || !(now.getHours() === 23 && now.getMinutes() >= 59);
   res.json({
     today_ymd: today,
     canEditToday,
     board_date_ymd: today,
-    allowPastEdits: ALLOW_PAST_EDITS,
-    pastEditMaxDays: PAST_EDIT_MAX_DAYS,
+    allowPastEdits: ALLOW_PAST_EDITS || ALWAYS_OPEN,
+    pastEditMaxDays: ALWAYS_OPEN ? 365 : PAST_EDIT_MAX_DAYS,
   });
 });
 
@@ -325,21 +369,30 @@ app.get("/api/me", auth, (req, res) => {
   res.json({ id: req.user.uid, name: req.user.name });
 });
 
+// ガチャ1回あたりのコイン消費
+const GACHA_COST = 30000;
+
 // コイン登録/更新（当日JST。1日内なら上書き可）
 app.post("/api/coins", auth, async (req, res) => {
   const coins = Number(req.body?.coins);
   if (!Number.isInteger(coins) || coins < 0)
     return res.status(400).json({ error: "coins must be non-negative integer" });
+  const spent = Number(req.body?.spent || 0);
+  if (!Number.isInteger(spent) || spent < 0)
+    return res.status(400).json({ error: "spent must be non-negative integer" });
+  const gacha = Number(req.body?.gacha || 0);
+  if (!Number.isInteger(gacha) || gacha < 0)
+    return res.status(400).json({ error: "gacha must be non-negative integer" });
   const date_ymd = (req.body?.date || jstDateYMD()).slice(0, 10);
 
   try {
     if (USE_PG) {
       await sqlRun(
-        `INSERT INTO coin_logs(user_id, date_ymd, coins, created_at)
-         VALUES (?, ?, ?, now())
+        `INSERT INTO coin_logs(user_id, date_ymd, coins, spent, gacha, created_at)
+         VALUES (?, ?, ?, ?, ?, now())
          ON CONFLICT (user_id, date_ymd)
-         DO UPDATE SET coins=EXCLUDED.coins, created_at=EXCLUDED.created_at`,
-        [req.user.uid, date_ymd, coins]
+         DO UPDATE SET coins=EXCLUDED.coins, spent=EXCLUDED.spent, gacha=EXCLUDED.gacha, created_at=EXCLUDED.created_at`,
+        [req.user.uid, date_ymd, coins, spent, gacha]
       );
     } else {
       const ex = await sqlGet(
@@ -347,15 +400,17 @@ app.post("/api/coins", auth, async (req, res) => {
         [req.user.uid, date_ymd]
       );
       if (ex) {
-        await sqlRun("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?", [
+        await sqlRun("UPDATE coin_logs SET coins=?, spent=?, gacha=?, created_at=? WHERE id=?", [
           coins,
+          spent,
+          gacha,
           nowISO(),
           ex.id,
         ]);
       } else {
         await sqlRun(
-          "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, ?)",
-          [req.user.uid, date_ymd, coins, nowISO()]
+          "INSERT INTO coin_logs(user_id, date_ymd, coins, spent, gacha, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [req.user.uid, date_ymd, coins, spent, gacha, nowISO()]
         );
       }
     }
@@ -365,7 +420,15 @@ app.post("/api/coins", auth, async (req, res) => {
       "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
       [req.user.uid, date_ymd]
     );
-    res.json({ date_ymd, coins, diff: prev ? coins - prev.coins : 0 });
+    const diff = prev ? coins - prev.coins : 0;
+    const gachaCost = gacha * GACHA_COST;
+    // 稼いだ額の計算:
+    // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
+    // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算（使ったということは稼いだ）
+    const earned = gacha > 0
+      ? Math.max(0, diff) + spent + gachaCost
+      : Math.abs(diff) + spent;
+    res.json({ date_ymd, coins, spent, gacha, diff, earned });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "server error" });
@@ -376,14 +439,26 @@ app.post("/api/coins", auth, async (req, res) => {
 app.get("/api/coins", auth, async (req, res) => {
   const days = Math.min(Number(req.query.days || 30), 365);
   const rows = await sqlAll(
-    "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
+    "SELECT date_ymd, coins, spent, gacha FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
     [req.user.uid, days]
   );
-  const normed = rows.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: r.coins }));
-  const withDiff = normed.map((r, i) => ({
-    ...r,
-    diff: i === normed.length - 1 ? 0 : r.coins - normed[i + 1].coins,
+  const normed = rows.map((r) => ({
+    date_ymd: normYMD(r.date_ymd),
+    coins: r.coins,
+    spent: r.spent || 0,
+    gacha: r.gacha || 0
   }));
+  const withDiff = normed.map((r, i) => {
+    const diff = i === normed.length - 1 ? 0 : r.coins - normed[i + 1].coins;
+    const gachaCost = r.gacha * GACHA_COST;
+    // 稼いだ額の計算:
+    // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
+    // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算（使ったということは稼いだ）
+    const earned = r.gacha > 0
+      ? Math.max(0, diff) + r.spent + gachaCost
+      : Math.abs(diff) + r.spent;
+    return { ...r, diff, earned };
+  });
   res.json(withDiff);
 });
 
@@ -392,10 +467,15 @@ app.get("/api/my_latest", auth, async (req, res) => {
   const limit = Math.max(1, Math.min(30, Number(req.query.limit || 7)));
   try {
     const rows = await sqlAll(
-      "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
+      "SELECT date_ymd, coins, spent, gacha FROM coin_logs WHERE user_id=? ORDER BY date_ymd DESC LIMIT ?",
       [req.user.uid, limit]
     );
-    res.json(rows.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: Number(r.coins) || 0 })));
+    res.json(rows.map((r) => ({
+      date_ymd: normYMD(r.date_ymd),
+      coins: Number(r.coins) || 0,
+      spent: Number(r.spent) || 0,
+      gacha: Number(r.gacha) || 0
+    })));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "server error" });
@@ -412,20 +492,29 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
   const coins = Number(req.body?.coins);
   if (!Number.isInteger(coins) || coins < 0)
     return res.status(400).json({ error: "coins must be non-negative integer" });
+  const spent = Number(req.body?.spent || 0);
+  if (!Number.isInteger(spent) || spent < 0)
+    return res.status(400).json({ error: "spent must be non-negative integer" });
+  const gacha = Number(req.body?.gacha || 0);
+  if (!Number.isInteger(gacha) || gacha < 0)
+    return res.status(400).json({ error: "gacha must be non-negative integer" });
 
   const today = jstDateYMD();
   const now = jstNow();
-  const canEditToday = !(now.getHours() === 23 && now.getMinutes() >= 59);
+  const canEditToday = ALWAYS_OPEN || !(now.getHours() === 23 && now.getMinutes() >= 59);
 
-  if (date_ymd === today) {
-    if (!canEditToday) return res.status(403).json({ error: "today is already finalized" });
-  } else {
-    if (!ALLOW_PAST_EDITS) return res.status(403).json({ error: "editing past days is locked" });
-    const diff = Math.abs(daysDiff(date_ymd, today));
-    if (PAST_EDIT_MAX_DAYS > 0 && diff > PAST_EDIT_MAX_DAYS) {
-      return res
-        .status(403)
-        .json({ error: `only past ${PAST_EDIT_MAX_DAYS} days can be edited` });
+  // ALWAYS_OPEN が有効なら時間制限をスキップ
+  if (!ALWAYS_OPEN) {
+    if (date_ymd === today) {
+      if (!canEditToday) return res.status(403).json({ error: "today is already finalized" });
+    } else {
+      if (!ALLOW_PAST_EDITS) return res.status(403).json({ error: "editing past days is locked" });
+      const diff = Math.abs(daysDiff(date_ymd, today));
+      if (PAST_EDIT_MAX_DAYS > 0 && diff > PAST_EDIT_MAX_DAYS) {
+        return res
+          .status(403)
+          .json({ error: `only past ${PAST_EDIT_MAX_DAYS} days can be edited` });
+      }
     }
   }
 
@@ -439,13 +528,17 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
     if (exist) {
       // 既存レコードを更新
       if (USE_PG) {
-        await sqlRun("UPDATE coin_logs SET coins=?, created_at=now() WHERE id=?", [
+        await sqlRun("UPDATE coin_logs SET coins=?, spent=?, gacha=?, created_at=now() WHERE id=?", [
           coins,
+          spent,
+          gacha,
           exist.id,
         ]);
       } else {
-        await sqlRun("UPDATE coin_logs SET coins=?, created_at=? WHERE id=?", [
+        await sqlRun("UPDATE coin_logs SET coins=?, spent=?, gacha=?, created_at=? WHERE id=?", [
           coins,
+          spent,
+          gacha,
           nowISO(),
           exist.id,
         ]);
@@ -454,19 +547,19 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
       // 新規レコードを作成
       if (USE_PG) {
         await sqlRun(
-          "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, now())",
-          [req.user.uid, date_ymd, coins]
+          "INSERT INTO coin_logs(user_id, date_ymd, coins, spent, gacha, created_at) VALUES (?, ?, ?, ?, ?, now())",
+          [req.user.uid, date_ymd, coins, spent, gacha]
         );
       } else {
         await sqlRun(
-          "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, ?)",
-          [req.user.uid, date_ymd, coins, nowISO()]
+          "INSERT INTO coin_logs(user_id, date_ymd, coins, spent, gacha, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [req.user.uid, date_ymd, coins, spent, gacha, nowISO()]
         );
       }
     }
 
     clearCache();
-    res.json({ date_ymd, coins });
+    res.json({ date_ymd, coins, spent });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: "server error" });
@@ -476,17 +569,18 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
 /* ============= ランキング（数値）：/api/board =============
    クエリ:
      date=YYYY-MM-DD（省略時は JST 今日）
-     mode=raw|daily|period（既定: daily）
-     periodDays=7（mode=period の窓幅）
+     mode=raw|daily|period|earned（既定: daily）
+     periodDays=7（mode=period|earned の窓幅）
    定義:
      raw    = 指定日までの最新値
      daily  = 指定日の前日比
-     period = 期間内に“存在する記録同士”の前日差(diff)を合計
-              └ 期間開始日前の基準値は使わない（最初の1件は差分0）
+     period = 期間内に"存在する記録同士"の前日差(diff)を合計
+     earned = 期間内に純粋に稼いだ額（diff + spent）を合計
+   ※ N+1 問題を解消：全データを2クエリで取得しメモリ上で計算
 ============================================================= */
 app.get("/api/board", async (req, res) => {
   const date = (req.query.date || jstDateYMD()).slice(0, 10);
-  const mode = String(req.query.mode || "daily").toLowerCase(); // raw|daily|period
+  const mode = String(req.query.mode || "daily").toLowerCase();
   const periodDays = Math.max(1, Number(req.query.periodDays || 7));
   const startDate = addDays(date, -(periodDays - 1));
 
@@ -495,48 +589,70 @@ app.get("/api/board", async (req, res) => {
   if (cached) return res.json({ ...cached, _fromCache: true });
 
   try {
+    // 1. 全ユーザー取得
     const users = await sqlAll("SELECT id, name FROM users ORDER BY id", []);
-    const board = [];
 
-    for (const u of users) {
-      // 指定日までの最新値と、その直前
-      const lastOnOrBefore = await sqlGet(
-        "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd DESC LIMIT 1",
-        [u.id, date]
-      );
-      const prevBeforeDate = await sqlGet(
-        "SELECT coins FROM coin_logs WHERE user_id=? AND date_ymd < ? ORDER BY date_ymd DESC LIMIT 1",
-        [u.id, date]
-      );
+    // 2. 必要なログを一括取得（期間内 + 直前の1件）
+    const allLogs = await sqlAll(
+      `SELECT user_id, date_ymd, coins, spent, gacha FROM coin_logs
+       WHERE date_ymd <= ? ORDER BY user_id, date_ymd ASC`,
+      [date]
+    );
 
+    // 3. user_id ごとにグループ化
+    const logsByUser = new Map();
+    for (const log of allLogs) {
+      if (!logsByUser.has(log.user_id)) logsByUser.set(log.user_id, []);
+      logsByUser.get(log.user_id).push({
+        date_ymd: normYMD(log.date_ymd),
+        coins: Number(log.coins) || 0,
+        spent: Number(log.spent) || 0,
+        gacha: Number(log.gacha) || 0
+      });
+    }
+
+    // 4. 各ユーザーのスコアを計算
+    const board = users.map(u => {
+      const logs = logsByUser.get(u.id) || [];
       let value = 0;
 
       if (mode === "raw") {
-        value = lastOnOrBefore?.coins || 0;
+        // 最新のコイン数
+        value = logs.length > 0 ? logs[logs.length - 1].coins : 0;
       } else if (mode === "daily") {
-        const vLast = lastOnOrBefore?.coins || 0;
-        const vPrev = prevBeforeDate?.coins || 0;
-        value = vLast - vPrev;
-      } else {
-        // period: 期間内“に存在する記録同士”の差分のみ合計（= 履歴画面のやり方）
-        const rows = await sqlAll(
-          "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd >= ? AND date_ymd <= ? ORDER BY date_ymd ASC",
-          [u.id, startDate, date]
-        );
-
-        let prev = null; // 期間内の直前レコード（期間外は見ない）
+        // 前日比
+        const last = logs.length > 0 ? logs[logs.length - 1].coins : 0;
+        const prev = logs.length > 1 ? logs[logs.length - 2].coins : 0;
+        value = last - prev;
+      } else if (mode === "period" || mode === "earned") {
+        // 期間内のログをフィルタ
+        const periodLogs = logs.filter(l => l.date_ymd >= startDate && l.date_ymd <= date);
+        let prev = null;
         let sum = 0;
-        for (const r of rows) {
+        for (const r of periodLogs) {
+          const gachaCost = r.gacha * GACHA_COST;
           if (prev !== null) {
-            sum += (Number(r.coins) || 0) - (Number(prev.coins) || 0);
+            const diff = r.coins - prev.coins;
+            // earnedモード: 稼いだ額の計算
+            // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
+            // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算
+            if (mode === "earned") {
+              sum += r.gacha > 0
+                ? Math.max(0, diff) + r.spent + gachaCost
+                : Math.abs(diff) + r.spent;
+            } else {
+              sum += diff;
+            }
+          } else if (mode === "earned") {
+            sum += r.spent + gachaCost;
           }
           prev = r;
         }
         value = sum;
       }
 
-      board.push({ name: u.name, value });
-    }
+      return { name: u.name, value };
+    });
 
     board.sort((a, b) => b.value - a.value || a.name.localeCompare(b.name));
     const payload = { date_ymd: date, mode, periodDays, board };
@@ -551,15 +667,12 @@ app.get("/api/board", async (req, res) => {
 
 /* =========== ランキング（折れ線グラフ）：/api/board_series ===========
    クエリ:
-     mode=raw|daily|period（既定: daily）
-     periodDays=7（mode=period の窓幅）
+     mode=raw|daily|period|earned（既定: daily）
+     periodDays=7（mode=period|earned の窓幅）
      days=14（系列に含める日数）
      top=5（上位N名）
      date=YYYY-MM-DD（終端日。省略時は lastFinalizedYmd()）
-   ロジック:
-     valuesRaw   = その日までの最新値（キャリー）
-     valuesDaily = 前日差
-     valuesPeriod= 前日差のローリング合計（窓幅 periodDays）
+   ※ N+1 問題を解消：全データを2クエリで取得しメモリ上で計算
 ======================================================================= */
 app.get("/api/board_series", async (req, res) => {
   try {
@@ -575,26 +688,49 @@ app.get("/api/board_series", async (req, res) => {
     const cached = getCache(cacheKey);
     if (cached) return res.json({ ...cached, _fromCache: true });
 
+    // 1. 全ユーザー取得
     const users = await sqlAll("SELECT id, name FROM users ORDER BY id", []);
-    const seriesAll = [];
 
-    for (const u of users) {
-      const logsAsc = await sqlAll(
-        "SELECT date_ymd, coins FROM coin_logs WHERE user_id=? AND date_ymd <= ? ORDER BY date_ymd ASC",
-        [u.id, endYmd]
-      );
-      const logs = logsAsc.map((r) => ({ date_ymd: normYMD(r.date_ymd), coins: r.coins }));
+    // 2. 全ログを一括取得
+    const allLogs = await sqlAll(
+      `SELECT user_id, date_ymd, coins, spent, gacha FROM coin_logs
+       WHERE date_ymd <= ? ORDER BY user_id, date_ymd ASC`,
+      [endYmd]
+    );
+
+    // 3. user_id ごとにグループ化
+    const logsByUser = new Map();
+    for (const log of allLogs) {
+      if (!logsByUser.has(log.user_id)) logsByUser.set(log.user_id, []);
+      logsByUser.get(log.user_id).push({
+        date_ymd: normYMD(log.date_ymd),
+        coins: Number(log.coins) || 0,
+        spent: Number(log.spent) || 0,
+        gacha: Number(log.gacha) || 0
+      });
+    }
+
+    // 4. 各ユーザーの系列を計算
+    const seriesAll = users.map(u => {
+      const logs = logsByUser.get(u.id) || [];
 
       // その日までの最新値（キャリー）
-      let idx = 0,
-        last = 0;
-      const valuesRaw = dates.map((d) => {
+      let idx = 0, last = 0;
+      const valuesRaw = [];
+      const spentByDate = [];
+      const gachaByDate = [];
+      const logMap = new Map(logs.map(l => [l.date_ymd, l]));
+
+      for (const d of dates) {
         while (idx < logs.length && logs[idx].date_ymd <= d) {
           last = logs[idx].coins;
           idx++;
         }
-        return last;
-      });
+        valuesRaw.push(last);
+        const logForDate = logMap.get(d);
+        spentByDate.push(logForDate ? logForDate.spent : 0);
+        gachaByDate.push(logForDate ? logForDate.gacha : 0);
+      }
 
       const valuesDaily = valuesRaw.map((v, i) => (i === 0 ? 0 : v - valuesRaw[i - 1]));
       const valuesPeriod = valuesRaw.map((_, i) => {
@@ -603,16 +739,34 @@ app.get("/api/board_series", async (req, res) => {
         for (let j = from; j <= i; j++) sum += j === 0 ? 0 : valuesRaw[j] - valuesRaw[j - 1];
         return sum;
       });
+      const valuesEarned = valuesRaw.map((_, i) => {
+        let sum = 0;
+        const from = Math.max(0, i - (periodDays - 1));
+        for (let j = from; j <= i; j++) {
+          const diff = j === 0 ? 0 : valuesRaw[j] - valuesRaw[j - 1];
+          const gachaCost = gachaByDate[j] * GACHA_COST;
+          // 稼いだ額の計算:
+          // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
+          // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算
+          sum += gachaByDate[j] > 0
+            ? Math.max(0, diff) + spentByDate[j] + gachaCost
+            : Math.abs(diff) + spentByDate[j];
+        }
+        return sum;
+      });
 
       const picked =
-        mode === "raw" ? valuesRaw : mode === "daily" ? valuesDaily : valuesPeriod;
+        mode === "raw" ? valuesRaw :
+        mode === "daily" ? valuesDaily :
+        mode === "earned" ? valuesEarned :
+        valuesPeriod;
 
-      seriesAll.push({
+      return {
         name: u.name,
         points: dates.map((d, i) => ({ date_ymd: d, value: picked[i] || 0 })),
         score: picked[picked.length - 1] || 0,
-      });
-    }
+      };
+    });
 
     const topSeries = seriesAll
       .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))

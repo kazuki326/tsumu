@@ -34,29 +34,41 @@ const testUsers = [
     name: "テストユーザー1",
     pin: "1234",
     baseCoins: 500000,
-    dailyGrowth: 50000, // 1日あたりの平均増加量
-    variance: 20000     // ランダムな変動幅
+    dailyEarned: 55000,   // 1日あたりの平均稼ぎ
+    earnedVariance: 20000, // 稼ぎのランダム変動幅
+    spentChance: 0.3,      // コインを使う確率
+    spentMin: 5000,        // 使う額の最小値
+    spentMax: 30000        // 使う額の最大値
   },
   {
     name: "テストユーザー2",
     pin: "1234",
     baseCoins: 300000,
-    dailyGrowth: 30000,
-    variance: 15000
+    dailyEarned: 35000,
+    earnedVariance: 15000,
+    spentChance: 0.4,
+    spentMin: 3000,
+    spentMax: 20000
   },
   {
     name: "テストユーザー3",
     pin: "1234",
     baseCoins: 800000,
-    dailyGrowth: 80000,
-    variance: 30000
+    dailyEarned: 90000,
+    earnedVariance: 30000,
+    spentChance: 0.2,
+    spentMin: 10000,
+    spentMax: 50000
   },
   {
     name: "あなた",
     pin: "1234",
     baseCoins: 450000,
-    dailyGrowth: 45000,
-    variance: 18000
+    dailyEarned: 50000,
+    earnedVariance: 18000,
+    spentChance: 0.35,
+    spentMin: 5000,
+    spentMax: 25000
   }
 ];
 
@@ -89,32 +101,46 @@ try {
     // 過去30日分のデータを生成
     let currentCoins = testUser.baseCoins;
     const records = [];
+    let totalEarned = 0;
+    let totalSpent = 0;
 
     for (let i = 29; i >= 0; i--) {
       const date = addDays(today, -i);
 
-      // ランダムな変動を追加（±variance）
-      const randomChange = Math.floor((Math.random() - 0.5) * 2 * testUser.variance);
-      const dailyChange = testUser.dailyGrowth + randomChange;
-      currentCoins += dailyChange;
+      // 稼いだ額（ランダム変動あり）
+      const earnedVariation = Math.floor((Math.random() - 0.5) * 2 * testUser.earnedVariance);
+      const earned = Math.max(0, testUser.dailyEarned + earnedVariation);
+
+      // 使った額（確率で発生）
+      let spent = 0;
+      if (Math.random() < testUser.spentChance) {
+        spent = Math.floor(testUser.spentMin + Math.random() * (testUser.spentMax - testUser.spentMin));
+      }
+
+      // コイン数を計算: 前日 + 稼いだ額 - 使った額
+      currentCoins = currentCoins + earned - spent;
 
       // 負の値にならないように
       currentCoins = Math.max(0, currentCoins);
 
-      records.push({ date, coins: currentCoins });
+      records.push({ date, coins: currentCoins, spent });
+      totalEarned += earned;
+      totalSpent += spent;
     }
 
     // データベースに挿入
     const insertStmt = db.prepare(
-      "INSERT INTO coin_logs(user_id, date_ymd, coins, created_at) VALUES (?, ?, ?, ?)"
+      "INSERT INTO coin_logs(user_id, date_ymd, coins, spent, created_at) VALUES (?, ?, ?, ?, ?)"
     );
 
     for (const record of records) {
-      insertStmt.run(userId, record.date, record.coins, new Date().toISOString());
+      insertStmt.run(userId, record.date, record.coins, record.spent, new Date().toISOString());
     }
 
     console.log(`   📊 ${records.length}日分のデータを作成しました`);
     console.log(`   💰 最新のコイン数: ${currentCoins.toLocaleString()}`);
+    console.log(`   📈 30日間の稼ぎ合計: ${totalEarned.toLocaleString()}`);
+    console.log(`   📉 30日間の使用合計: ${totalSpent.toLocaleString()}`);
   }
 
   console.log("\n" + "=".repeat(50));
