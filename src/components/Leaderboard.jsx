@@ -60,30 +60,28 @@ export function Leaderboard({
 
       {/* 指標タブ（5つ） */}
       <Tabs value={boardTab} onValueChange={setBoardTab}>
-        <div className="overflow-x-auto -mx-1 px-1">
-          <TabsList className="w-full justify-start gap-1 h-auto p-1 border border-border bg-card">
-            <TabsTrigger value="earned7d" className="text-xs px-3 py-2 data-[state=active]:bg-card">
-              <Trophy className="w-3 h-3 mr-1" />
-              7日間稼ぎ
-            </TabsTrigger>
-            <TabsTrigger value="raw" className="text-xs px-3 py-2 data-[state=active]:bg-card">
-              <Coins className="w-3 h-3 mr-1" />
-              コイン数
-            </TabsTrigger>
-            <TabsTrigger value="daily" className="text-xs px-3 py-2 data-[state=active]:bg-card">
-              <TrendingUp className="w-3 h-3 mr-1" />
-              前日比
-            </TabsTrigger>
-            <TabsTrigger value="7d" className="text-xs px-3 py-2 data-[state=active]:bg-card">
-              <Calendar className="w-3 h-3 mr-1" />
-              7日間
-            </TabsTrigger>
-            <TabsTrigger value="30d" className="text-xs px-3 py-2 data-[state=active]:bg-card">
-              <Calendar className="w-3 h-3 mr-1" />
-              30日間
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        <TabsList className="flex flex-wrap gap-1 mb-3 sticky top-0 bg-card z-10 py-2">
+          <TabsTrigger value="earned7d" className="text-xs px-3 py-2">
+            <Trophy className="w-3 h-3 mr-1" />
+            7日間稼ぎ
+          </TabsTrigger>
+          <TabsTrigger value="raw" className="text-xs px-3 py-2">
+            <Coins className="w-3 h-3 mr-1" />
+            コイン数
+          </TabsTrigger>
+          <TabsTrigger value="daily" className="text-xs px-3 py-2">
+            <TrendingUp className="w-3 h-3 mr-1" />
+            前日比
+          </TabsTrigger>
+          <TabsTrigger value="7d" className="text-xs px-3 py-2">
+            <Calendar className="w-3 h-3 mr-1" />
+            7日間
+          </TabsTrigger>
+          <TabsTrigger value="30d" className="text-xs px-3 py-2">
+            <Calendar className="w-3 h-3 mr-1" />
+            30日間
+          </TabsTrigger>
+        </TabsList>
 
         {/* コイン数タブ：スナップショットの棒バーのみ */}
         <TabsContent value="raw" className="mt-4">

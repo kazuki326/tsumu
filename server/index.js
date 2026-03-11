@@ -372,6 +372,13 @@ app.get("/api/me", auth, (req, res) => {
 // ガチャ1回あたりのコイン消費
 const GACHA_COST = 30000;
 
+// 純粋な稼ぎを計算（ガチャ・spent消費を補正）
+function calcEarned(diff, gacha, spent) {
+  const gachaCost = gacha * GACHA_COST;
+  const adjustedDiff = diff + gachaCost + spent;
+  return Math.max(0, adjustedDiff);
+}
+
 // コイン登録/更新（当日JST。1日内なら上書き可）
 app.post("/api/coins", auth, async (req, res) => {
   const coins = Number(req.body?.coins);
@@ -450,13 +457,7 @@ app.get("/api/coins", auth, async (req, res) => {
   }));
   const withDiff = normed.map((r, i) => {
     const diff = i === normed.length - 1 ? 0 : r.coins - normed[i + 1].coins;
-    const gachaCost = r.gacha * GACHA_COST;
-    // 稼いだ額の計算:
-    // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
-    // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算（使ったということは稼いだ）
-    const earned = r.gacha > 0
-      ? Math.max(0, diff) + r.spent + gachaCost
-      : Math.abs(diff) + r.spent;
+    const earned = calcEarned(diff, r.gacha, r.spent);
     return { ...r, diff, earned };
   });
   res.json(withDiff);
@@ -585,7 +586,8 @@ app.get("/api/board", async (req, res) => {
   const startDate = addDays(date, -(periodDays - 1));
 
   const cacheKey = `board:${date}:${mode}:${periodDays}`;
-  const cached = getCache(cacheKey);
+  const skipCache = req.query.skipCache === "true";
+  const cached = !skipCache && getCache(cacheKey);
   if (cached) return res.json({ ...cached, _fromCache: true });
 
   try {
@@ -625,27 +627,26 @@ app.get("/api/board", async (req, res) => {
         const prev = logs.length > 1 ? logs[logs.length - 2].coins : 0;
         value = last - prev;
       } else if (mode === "period" || mode === "earned") {
-        // 期間内のログをフィルタ
-        const periodLogs = logs.filter(l => l.date_ymd >= startDate && l.date_ymd <= date);
+        // 期間の1日前からフィルタ（期間最初の日のdiff計算用）
+        const dayBefore = addDays(startDate, -1);
+        const periodLogs = logs.filter(l => l.date_ymd >= dayBefore && l.date_ymd <= date);
         let prev = null;
         let sum = 0;
         for (const r of periodLogs) {
-          const gachaCost = r.gacha * GACHA_COST;
+          if (r.date_ymd < startDate) {
+            // 期間前のデータはprevを設定するだけ（sumには加算しない）
+            prev = r;
+            continue;
+          }
           if (prev !== null) {
             const diff = r.coins - prev.coins;
-            // earnedモード: 稼いだ額の計算
-            // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
-            // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算
             if (mode === "earned") {
-              sum += r.gacha > 0
-                ? Math.max(0, diff) + r.spent + gachaCost
-                : Math.abs(diff) + r.spent;
+              sum += calcEarned(diff, r.gacha, r.spent);
             } else {
               sum += diff;
             }
-          } else if (mode === "earned") {
-            sum += r.spent + gachaCost;
           }
+          // prev === null の場合は前日データがないので計算不可（何も加算しない）
           prev = r;
         }
         value = sum;
@@ -685,7 +686,8 @@ app.get("/api/board_series", async (req, res) => {
     const dates = listDates(startYmd, endYmd);
 
     const cacheKey = `series:${endYmd}:${mode}:${periodDays}:${days}:${top}`;
-    const cached = getCache(cacheKey);
+    const skipCache = req.query.skipCache === "true";
+    const cached = !skipCache && getCache(cacheKey);
     if (cached) return res.json({ ...cached, _fromCache: true });
 
     // 1. 全ユーザー取得
@@ -743,14 +745,9 @@ app.get("/api/board_series", async (req, res) => {
         let sum = 0;
         const from = Math.max(0, i - (periodDays - 1));
         for (let j = from; j <= i; j++) {
-          const diff = j === 0 ? 0 : valuesRaw[j] - valuesRaw[j - 1];
-          const gachaCost = gachaByDate[j] * GACHA_COST;
-          // 稼いだ額の計算:
-          // - ガチャありの場合: マイナス増減は0として扱う（ガチャ消費で既にカウント）
-          // - ガチャなしでコインが減った場合: 減った分も稼いだ額に加算
-          sum += gachaByDate[j] > 0
-            ? Math.max(0, diff) + spentByDate[j] + gachaCost
-            : Math.abs(diff) + spentByDate[j];
+          if (j === 0) continue; // 最初の日は前日データがないのでスキップ
+          const diff = valuesRaw[j] - valuesRaw[j - 1];
+          sum += calcEarned(diff, gachaByDate[j], spentByDate[j]);
         }
         return sum;
       });

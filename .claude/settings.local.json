@@ -27,7 +27,9 @@
       "Bash(powershell -Command \"Stop-Process -Id 11104 -Force\")",
       "Bash(powershell:*)",
       "Bash(sqlite3:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(claude config list:*)",
+      "Bash(claude config:*)"
     ],
     "deny": [],
     "ask": []

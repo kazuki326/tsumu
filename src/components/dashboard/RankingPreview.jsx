@@ -1,7 +1,8 @@
 // src/components/dashboard/RankingPreview.jsx
-// 7日間ランキング - 1位を強調、トップ3表示、自分の順位も表示
+// 7日間ランキング - タブ切り替え（稼いだ額/増減/コイン数）
 
-import { Trophy, ChevronRight, Coins, Crown } from "lucide-react";
+import { useState } from "react";
+import { Trophy, ChevronRight, Coins, Crown, TrendingUp, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
@@ -13,7 +14,18 @@ const formatDate = (ymd) => {
   return `${Number(m)}/${Number(d)}`;
 };
 
-export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, onViewFull }) {
+const TAB_CONFIG = {
+  earned: { label: "稼いだ額", icon: Wallet, unit: "枚", showPlus: true },
+  period: { label: "増減", icon: TrendingUp, unit: "枚", showPlus: true },
+  raw: { label: "コイン数", icon: Coins, unit: "枚", showPlus: false }
+};
+
+export function RankingPreview({ myName, boards = {}, periodDays = 7, periodEnd, onViewFull }) {
+  const [activeTab, setActiveTab] = useState("earned");
+
+  const board = boards[activeTab] || [];
+  const config = TAB_CONFIG[activeTab];
+
   // 期間の開始日を計算
   const calcPeriodStart = (endYmd, days) => {
     if (!endYmd) return "";
@@ -41,6 +53,14 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
   // 自分がトップ3に入っているか
   const isMyRankInTop3 = myRank !== null && myRank <= 3;
 
+  // 値のフォーマット（+記号付きかどうか）
+  const formatValue = (val) => {
+    const v = Number(val);
+    if (config.showPlus && v > 0) return `+${fmt(v)}`;
+    if (config.showPlus && v < 0) return fmt(v);
+    return fmt(v);
+  };
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       {/* ヘッダー */}
@@ -48,8 +68,8 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
         <h3 className="font-semibold text-sm flex items-center gap-2">
           <Trophy className="w-4 h-4 text-muted-foreground" />
           <span>
-            {periodDays}日間ランキング
-            {periodLabel && (
+            {activeTab === "raw" ? "ランキング" : `${periodDays}日間ランキング`}
+            {activeTab !== "raw" && periodLabel && (
               <span className="text-muted-foreground font-normal ml-1">（{periodLabel}）</span>
             )}
           </span>
@@ -60,6 +80,24 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
         </Button>
       </div>
 
+      {/* タブ */}
+      <div className="flex border-b border-border">
+        {Object.entries(TAB_CONFIG).map(([key, { label, icon: Icon }]) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors
+              ${activeTab === key
+                ? "text-foreground border-b-2 border-primary bg-secondary/50"
+                : "text-muted-foreground hover:text-foreground hover:bg-secondary/30"
+              }`}
+          >
+            <Icon className="w-3 h-3" />
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="p-4 space-y-4">
         {/* 1位を強調表示 */}
         {top1 && (
@@ -67,7 +105,7 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
             <div className="flex items-center gap-2 mb-2">
               <Crown className="w-5 h-5 text-amber-500" />
               <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                {periodDays}日間の1位
+                {activeTab === "raw" ? "コイン数" : `${periodDays}日間`}の1位
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -82,9 +120,9 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
               </div>
               <div className="text-right">
                 <div className="text-xl font-black tabular-nums text-amber-600 dark:text-amber-400">
-                  +{fmt(top1.value)}
+                  {formatValue(top1.value)}
                 </div>
-                <div className="text-xs text-muted-foreground">枚</div>
+                <div className="text-xs text-muted-foreground">{config.unit}</div>
               </div>
             </div>
           </div>
@@ -96,6 +134,7 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
             {top3.slice(1).map((entry, i) => {
               const rank = i + 2; // 2位から
               const isMe = entry.name.toLowerCase() === myName?.toLowerCase();
+              const val = Number(entry.value);
               return (
                 <div
                   key={entry.name}
@@ -110,8 +149,12 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
                       {isMe && <span className="ml-1 text-xs text-muted-foreground">(あなた)</span>}
                     </span>
                   </div>
-                  <span className={`text-sm font-bold tabular-nums ${entry.value >= 0 ? "text-success" : "text-danger"}`}>
-                    +{fmt(entry.value)}
+                  <span className={`text-sm font-bold tabular-nums ${
+                    config.showPlus
+                      ? (val >= 0 ? "text-success" : "text-danger")
+                      : "text-foreground"
+                  }`}>
+                    {formatValue(val)}
                   </span>
                 </div>
               );
@@ -132,10 +175,14 @@ export function RankingPreview({ myName, board = [], periodDays = 7, periodEnd, 
                 </div>
               </div>
               <div className="text-right">
-                <span className={`text-sm font-bold tabular-nums ${myData.value >= 0 ? "text-success" : "text-danger"}`}>
-                  +{fmt(myData.value)}
+                <span className={`text-sm font-bold tabular-nums ${
+                  config.showPlus
+                    ? (Number(myData.value) >= 0 ? "text-success" : "text-danger")
+                    : "text-foreground"
+                }`}>
+                  {formatValue(myData.value)}
                 </span>
-                <div className="text-xs text-muted-foreground">枚</div>
+                <div className="text-xs text-muted-foreground">{config.unit}</div>
               </div>
             </div>
           </div>

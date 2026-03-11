@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Sun, Moon, Monitor, Settings, LogOut, ChevronDown, Calendar, Edit3, Target, TrendingUp, Trophy, History } from "lucide-react";
 
@@ -121,8 +121,12 @@ export default function App() {
   const [isProvisional, setIsProvisional] = useState(false);
   const [staleBoard, setStaleBoard] = useState(false);
 
-  // RankingPreview専用: 7日間稼ぎランキング
-  const [earned7dBoard, setEarned7dBoard] = useState([]);
+  // RankingPreview専用: 3種類のランキングデータ
+  const [previewBoards, setPreviewBoards] = useState({
+    earned: [],  // 稼いだ額
+    period: [],  // 増減
+    raw: []      // コイン数
+  });
 
   // マイページの詳細セクション開閉
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -178,29 +182,58 @@ export default function App() {
     }
   };
 
+  // バックグラウンド再取得のキャンセル用
+  const boardRefreshRef = useRef(0);
+
   const loadBoard = async () => {
+    const requestId = ++boardRefreshRef.current;
     try {
       const opts = { ...modeMap[boardTab] };
       if (todayYmd && canEdit) opts.date = todayYmd;
       const b = await api.board(opts);
+
+      // リクエスト中にタブが変わっていたら無視
+      if (requestId !== boardRefreshRef.current) return;
+
       setBoard(Array.isArray(b?.board) ? b.board : []);
       if (b?.date_ymd) setBoardDate(b.date_ymd);
       setIsProvisional(!!(todayYmd && canEdit && b?.date_ymd === todayYmd));
       setStaleBoard(!!b?._fromCache);
+
+      // キャッシュデータの場合、バックグラウンドで新しいデータを取得
+      if (b?._fromCache) {
+        api.board({ ...opts, skipCache: "true" }).then((fresh) => {
+          // リクエスト中にタブが変わっていたら無視
+          if (requestId !== boardRefreshRef.current) return;
+          setBoard(Array.isArray(fresh?.board) ? fresh.board : []);
+          if (fresh?.date_ymd) setBoardDate(fresh.date_ymd);
+          setStaleBoard(false);
+        }).catch(() => {
+          if (requestId !== boardRefreshRef.current) return;
+          setStaleBoard(false);
+        });
+      }
     } catch (err) {
       console.warn("Failed to load board:", err);
     }
   };
 
-  // RankingPreview専用: 7日間稼ぎランキングを取得
-  const loadEarned7dBoard = async () => {
+  // RankingPreview専用: 3種類のランキングデータを取得
+  const loadPreviewBoards = async () => {
     try {
-      const opts = { mode: "earned", periodDays: 7 };
-      if (todayYmd && canEdit) opts.date = todayYmd;
-      const b = await api.board(opts);
-      setEarned7dBoard(Array.isArray(b?.board) ? b.board : []);
+      const baseOpts = todayYmd && canEdit ? { date: todayYmd } : {};
+      const [earnedRes, periodRes, rawRes] = await Promise.all([
+        api.board({ mode: "earned", periodDays: 7, ...baseOpts }),
+        api.board({ mode: "period", periodDays: 7, ...baseOpts }),
+        api.board({ mode: "raw", ...baseOpts })
+      ]);
+      setPreviewBoards({
+        earned: Array.isArray(earnedRes?.board) ? earnedRes.board : [],
+        period: Array.isArray(periodRes?.board) ? periodRes.board : [],
+        raw: Array.isArray(rawRes?.board) ? rawRes.board : []
+      });
     } catch (err) {
-      console.warn("Failed to load earned7d board:", err);
+      console.warn("Failed to load preview boards:", err);
     }
   };
 
@@ -222,7 +255,7 @@ export default function App() {
   useEffect(() => {
     if (!serverReady) return;
     loadMy();
-    loadEarned7dBoard();
+    loadPreviewBoards();
   }, [loggedIn, serverReady]);
 
   useEffect(() => {
@@ -233,7 +266,7 @@ export default function App() {
   // todayYmd/canEditが変わったらearned7dBoardも更新
   useEffect(() => {
     if (!serverReady) return;
-    loadEarned7dBoard();
+    loadPreviewBoards();
   }, [todayYmd, canEdit, serverReady]);
 
   /* ---- 認証 ---- */
@@ -309,7 +342,7 @@ export default function App() {
       setSpent("");
       setGacha("");
       toast.success("保存しました");
-      await Promise.all([loadMy(), loadBoard(), loadEarned7dBoard()]);
+      await Promise.all([loadMy(), loadBoard(), loadPreviewBoards()]);
     } finally {
       setBusy(false);
     }
@@ -431,6 +464,7 @@ export default function App() {
           detailsOpen={detailsOpen}
           setDetailsOpen={setDetailsOpen}
           latestCoins={latestCoins}
+          previewBoards={previewBoards}
           onLogout={() => {
             localStorage.removeItem("token");
             setToken("");
@@ -449,13 +483,13 @@ export default function App() {
                 return;
               }
               toast.success("保存しました");
-              await Promise.all([loadMy(), loadBoard(), loadEarned7dBoard()]);
+              await Promise.all([loadMy(), loadBoard(), loadPreviewBoards()]);
             } finally {
               setBusy(false);
             }
           }}
           onDataUpdated={async () => {
-            await Promise.all([loadMy(), loadBoard(), loadEarned7dBoard()]);
+            await Promise.all([loadMy(), loadBoard(), loadPreviewBoards()]);
           }}
         />
       )}
@@ -767,6 +801,7 @@ function MyPageDashboard({
   detailsOpen,
   setDetailsOpen,
   latestCoins,
+  previewBoards,
   onLogout,
   onNotifications,
   onSubmitCoins,
@@ -877,7 +912,7 @@ function MyPageDashboard({
       {/* ランキングプレビュー */}
       <RankingPreview
         myName={displayName}
-        board={board}
+        boards={previewBoards}
         periodDays={7}
         periodEnd={todayYmd}
         onViewFull={() => {
@@ -893,7 +928,7 @@ function MyPageDashboard({
         <CollapsibleTrigger asChild>
           <Button
             variant="outline"
-            className="w-full justify-between h-12"
+            className="w-full justify-between h-12 data-[state=open]:bg-background data-[state=open]:border-input data-[state=open]:text-foreground data-[state=closed]:bg-background data-[state=closed]:border-input data-[state=closed]:text-foreground"
           >
             <span className="flex items-center gap-2">
               <ChevronDown className={`h-4 w-4 transition-transform ${detailsOpen ? "rotate-180" : ""}`} />
