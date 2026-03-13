@@ -61,7 +61,8 @@ self.addEventListener('notificationclick', (event) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       // 既に開いているタブがあればそれをアクティブにする
       for (const client of clientList) {
-        if (client.url === urlToOpen && 'focus' in client) {
+        // URLのパス部分で比較（完全一致ではなく含むかどうか）
+        if (client.url.includes(urlToOpen) && 'focus' in client) {
           return client.focus();
         }
       }

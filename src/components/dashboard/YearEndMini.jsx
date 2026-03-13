@@ -1,13 +1,21 @@
 // src/components/dashboard/YearEndMini.jsx
-// 年末予測のコンパクト表示（1日の稼ぎを編集可能）
+// 年末予測のコンパクト表示（1日の稼ぎ・目標値を編集可能）
 
 import { useMemo, useState } from "react";
-import { Target, Pencil, Check } from "lucide-react";
+import { Target, Pencil, Check, Flag } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 export function YearEndMini({ todayYmd, baseCoins, avgPerDay = 50000, onChangeAvg }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+
+  // 目標値（localStorageで永続化）
+  const [goalCoins, setGoalCoins] = useState(() => {
+    const v = Number(localStorage.getItem("goalCoins") || 0);
+    return Number.isFinite(v) && v >= 0 ? v : 0;
+  });
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalDraft, setGoalDraft] = useState("");
 
   const { remainDays, projected } = useMemo(() => {
     const today = todayYmd || new Date().toISOString().slice(0, 10);
@@ -20,16 +28,16 @@ export function YearEndMini({ todayYmd, baseCoins, avgPerDay = 50000, onChangeAv
     return { remainDays, projected };
   }, [todayYmd, baseCoins, avgPerDay]);
 
-  const yearProgress = useMemo(() => {
-    const today = todayYmd || new Date().toISOString().slice(0, 10);
-    const year = today.slice(0, 4);
-    const start = new Date(`${year}-01-01T00:00:00Z`);
-    const end = new Date(`${year}-12-31T00:00:00Z`);
-    const now = new Date(today + "T00:00:00Z");
-    const total = (end - start) / 86400000 + 1;
-    const elapsed = (now - start) / 86400000 + 1;
-    return Math.round((elapsed / total) * 100);
-  }, [todayYmd]);
+  // 目標に対する進捗と必要な1日あたりの稼ぎ
+  const goalInfo = useMemo(() => {
+    if (!goalCoins || goalCoins <= 0) return null;
+    const current = Number(baseCoins) || 0;
+    const progress = Math.min(100, Math.round((current / goalCoins) * 100));
+    const remaining = Math.max(0, goalCoins - current);
+    const requiredPerDay = remainDays > 0 ? Math.ceil(remaining / remainDays) : 0;
+    const onTrack = projected >= goalCoins;
+    return { progress, remaining, requiredPerDay, onTrack };
+  }, [goalCoins, baseCoins, remainDays, projected]);
 
   const fmt = (n) => Number(n).toLocaleString();
 
@@ -38,6 +46,16 @@ export function YearEndMini({ todayYmd, baseCoins, avgPerDay = 50000, onChangeAv
     const v = Number(draft);
     if (Number.isFinite(v) && v >= 0) onChangeAvg?.(v);
     setEditing(false);
+  };
+
+  const startGoalEdit = () => { setGoalDraft(String(goalCoins || "")); setEditingGoal(true); };
+  const commitGoalEdit = () => {
+    const v = Number(goalDraft);
+    if (Number.isFinite(v) && v >= 0) {
+      setGoalCoins(v);
+      localStorage.setItem("goalCoins", String(v));
+    }
+    setEditingGoal(false);
   };
 
   return (
@@ -89,18 +107,65 @@ export function YearEndMini({ todayYmd, baseCoins, avgPerDay = 50000, onChangeAv
         )}
       </div>
 
-      {/* プログレスバー */}
-      <div className="mt-3">
-        <div className="flex justify-between text-xs text-muted-foreground mb-1">
-          <span>年間進捗</span>
-          <span>{yearProgress}%</span>
+      {/* 目標セクション */}
+      <div className="mt-4 pt-3 border-t border-border">
+        <div className="flex items-center gap-2 mb-2">
+          <Flag className="w-3.5 h-3.5 text-muted-foreground" />
+          <span className="text-xs font-medium">年末目標</span>
         </div>
-        <div className="h-1.5 bg-border/50 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-primary rounded-full transition-all"
-            style={{ width: `${yearProgress}%` }}
-          />
-        </div>
+
+        {editingGoal ? (
+          <div className="flex items-center gap-1.5">
+            <Input
+              value={goalDraft}
+              onChange={(e) => setGoalDraft(e.target.value.replace(/[^\d]/g, ""))}
+              onKeyDown={(e) => { if (e.key === "Enter") commitGoalEdit(); }}
+              inputMode="numeric"
+              autoFocus
+              placeholder="目標枚数"
+              className="flex-1 h-8 text-right text-sm"
+            />
+            <span className="text-xs text-muted-foreground">枚</span>
+            <button
+              onClick={commitGoalEdit}
+              className="p-1.5 rounded-md bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            >
+              <Check className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ) : goalInfo ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                onClick={startGoalEdit}
+                className="text-sm font-semibold tabular-nums hover:text-primary transition-colors group flex items-center gap-1"
+              >
+                {fmt(goalCoins)}枚
+                <Pencil className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+              <span className={`text-xs font-medium ${goalInfo.onTrack ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+                {goalInfo.onTrack ? "達成見込み" : "ペース不足"}
+              </span>
+            </div>
+            <div className="h-1.5 bg-border/50 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${goalInfo.onTrack ? "bg-green-500" : "bg-amber-500"}`}
+                style={{ width: `${goalInfo.progress}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>進捗 {goalInfo.progress}%</span>
+              <span>必要: {fmt(goalInfo.requiredPerDay)}/日</span>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={startGoalEdit}
+            className="w-full py-2 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg hover:border-primary/50 transition-colors"
+          >
+            目標を設定する
+          </button>
+        )}
       </div>
     </div>
   );

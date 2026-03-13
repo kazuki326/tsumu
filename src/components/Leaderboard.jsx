@@ -20,16 +20,14 @@ export function Leaderboard({
   const [series, setSeries] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // コイン数タブかどうか
-  const isRaw = boardTab === "raw";
-
-  // boardSeries のパラメータ
+  // boardSeries のパラメータ（rawも含む）
   const seriesParams = useMemo(() => {
     if (boardTab === "earned7d") return { mode: "earned", periodDays: 7, days: 28, top: 5, date: boardDate };
     if (boardTab === "daily") return { mode: "daily", days: 14, top: 5, date: boardDate };
     if (boardTab === "7d")    return { mode: "period", periodDays: 7,  days: 28, top: 5, date: boardDate };
     if (boardTab === "30d")   return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate };
-    return null; // raw は取得しない
+    if (boardTab === "raw")   return { mode: "raw", days: 28, top: 5, date: boardDate };
+    return null;
   }, [boardTab, boardDate]);
 
   // グラフデータ取得（raw以外）
@@ -83,29 +81,33 @@ export function Leaderboard({
           </TabsTrigger>
         </TabsList>
 
-        {/* コイン数タブ：スナップショットの棒バーのみ */}
-        <TabsContent value="raw" className="mt-4">
-          <div className="border border-border rounded-xl overflow-hidden">
-            <div className="px-4 py-2 border-b border-border">
-              <h4 className="text-sm font-semibold flex items-center gap-2">
-                <Coins className="w-4 h-4 text-muted-foreground" />
-                コイン数ランキング
-              </h4>
-            </div>
-            <div className="p-4">
-              <RankListAndBars data={board} unit={labelForTab("raw")} />
-            </div>
-          </div>
-        </TabsContent>
-
-        {/* その他タブ：グラフ + スナップショット */}
-        {["earned7d", "daily", "7d", "30d"].map((tab) => (
+        {/* 全タブ共通：ランキング棒バー + グラフ（下に配置） */}
+        {["earned7d", "raw", "daily", "7d", "30d"].map((tab) => (
           <TabsContent key={tab} value={tab} className="mt-4 space-y-4">
-            {/* グラフ */}
+            {/* ランキング棒バー（上） */}
+            <div className="border border-border rounded-xl overflow-hidden bg-card">
+              <div className="px-4 py-2 border-b border-border">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  {tab === "raw" ? (
+                    <Coins className="w-4 h-4 text-muted-foreground" />
+                  ) : (
+                    <Trophy className="w-4 h-4 text-muted-foreground" />
+                  )}
+                  {tab === "raw" ? "コイン数ランキング" : "ランキング（現時点）"}
+                </h4>
+              </div>
+              <div className="p-4">
+                <RankListAndBars data={board} unit={labelForTab(tab)} />
+              </div>
+            </div>
+
+            {/* トレンドグラフ（下） */}
             <div className="bg-gradient-to-br from-indigo-50/50 to-violet-50/50 dark:from-indigo-950/30 dark:to-violet-950/30 rounded-xl p-4 border border-indigo-100 dark:border-indigo-900">
               <div className="flex items-center gap-2 mb-3">
                 <BarChart3 className="w-4 h-4 text-indigo-500" />
-                <h4 className="text-sm font-semibold">トレンドグラフ</h4>
+                <h4 className="text-sm font-semibold">
+                  {tab === "raw" ? "コイン数推移" : "トレンドグラフ"}
+                </h4>
               </div>
               {loading ? (
                 <div className="flex items-center justify-center py-8 text-muted-foreground text-sm">
@@ -117,19 +119,6 @@ export function Leaderboard({
               ) : (
                 <LineChartWithDismiss series={series} unit={labelForTab(tab)} />
               )}
-            </div>
-
-            {/* スナップショット棒バー */}
-            <div className="border border-border rounded-xl overflow-hidden bg-card">
-              <div className="px-4 py-2 border-b border-border">
-                <h4 className="text-sm font-semibold flex items-center gap-2">
-                  <Trophy className="w-4 h-4 text-muted-foreground" />
-                  ランキング（現時点）
-                </h4>
-              </div>
-              <div className="p-4">
-                <RankListAndBars data={board} unit={labelForTab(tab)} />
-              </div>
             </div>
           </TabsContent>
         ))}

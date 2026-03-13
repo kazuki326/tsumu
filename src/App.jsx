@@ -1,7 +1,7 @@
 // src/App.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Sun, Moon, Monitor, Settings, LogOut, ChevronDown, Calendar, Edit3, Target, TrendingUp, Trophy, History } from "lucide-react";
+import { Sun, Moon, Monitor, Settings, LogOut, ChevronDown, Calendar, Edit3, Target, Trophy } from "lucide-react";
 
 import { api } from "./api";
 import { useTheme } from "@/hooks/use-theme";
@@ -17,7 +17,6 @@ import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
-  CollapsibleChevron,
 } from "@/components/ui/collapsible";
 
 // Custom components (keep existing)
@@ -881,14 +880,6 @@ function MyPageDashboard({
         sum30={sum30}
       />
 
-      {/* 年末予測（コンパクト表示） */}
-      <YearEndMini
-        todayYmd={todayYmd}
-        baseCoins={latestCoins}
-        avgPerDay={avgPerDay}
-        onChangeAvg={handleChangeAvg}
-      />
-
       {/* 今日の入力CTA */}
       <QuickInput
         todayYmd={todayYmd}
@@ -896,6 +887,14 @@ function MyPageDashboard({
         busy={busy}
         latestCoins={latestCoins}
         onSubmit={onSubmitCoins}
+      />
+
+      {/* 年末予測（コンパクト表示） */}
+      <YearEndMini
+        todayYmd={todayYmd}
+        baseCoins={latestCoins}
+        avgPerDay={avgPerDay}
+        onChangeAvg={handleChangeAvg}
       />
 
       {/* ミニチャート */}

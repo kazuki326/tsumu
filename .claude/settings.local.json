@@ -29,7 +29,8 @@
       "Bash(sqlite3:*)",
       "Bash(curl:*)",
       "Bash(claude config list:*)",
-      "Bash(claude config:*)"
+      "Bash(claude config:*)",
+      "Bash(dir:*)"
     ],
     "deny": [],
     "ask": []
