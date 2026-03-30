@@ -1,13 +1,14 @@
 // src/components/dashboard/MiniChart.jsx
-// 14日間のコイン推移チャート（タップで詳細表示）
+// 14日間のコイン推移・ガチャ回数チャート（タブ切り替え）
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronRight, TrendingUp, TrendingDown, Sparkles } from "lucide-react";
+import { ChevronRight, TrendingUp, Sparkles, Coins } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function MiniChart({ data = [], onExpand }) {
   const chartData = data.slice(0, 14).reverse();
   const [activeIndex, setActiveIndex] = useState(null);
+  const [chartMode, setChartMode] = useState("coins"); // "coins" or "gacha"
   const containerRef = useRef(null);
   const [containerWidth, setContainerWidth] = useState(320);
 
@@ -27,12 +28,17 @@ export function MiniChart({ data = [], onExpand }) {
     return () => observer.disconnect();
   }, []);
 
+  // タブ切り替え時にactiveIndexをリセット
+  useEffect(() => {
+    setActiveIndex(null);
+  }, [chartMode]);
+
   if (chartData.length < 2) {
     return (
       <div className="bg-card border border-border rounded-xl p-4">
         <h3 className="font-semibold text-sm flex items-center gap-2 mb-2">
           <TrendingUp className="w-4 h-4 text-muted-foreground" />
-          コイン推移
+          推移チャート
         </h3>
         <p className="text-muted-foreground text-sm text-center py-4">
           データが2日以上必要です
@@ -41,11 +47,28 @@ export function MiniChart({ data = [], onExpand }) {
     );
   }
 
-  const values = chartData.map((r) => Number(r.coins));
-  const minV = Math.min(...values);
-  const maxV = Math.max(...values);
+  // コインモード用の値
+  const coinValues = chartData.map((r) => Number(r.coins));
+  const coinMin = Math.min(...coinValues);
+  const coinMax = Math.max(...coinValues);
+  const coinRange = coinMax - coinMin || 1;
+  const coinTrend = coinValues[coinValues.length - 1] - coinValues[0];
+  const coinTrendPercent = coinValues[0] > 0 ? ((coinTrend / coinValues[0]) * 100).toFixed(1) : 0;
+  const coinIsUp = coinTrend >= 0;
+
+  // ガチャモード用の値
+  const gachaValues = chartData.map((r) => Number(r.gacha) || 0);
+  const gachaTotal = gachaValues.reduce((a, b) => a + b, 0);
+  const gachaMax = Math.max(...gachaValues, 1);
+
+  // 現在のモードに応じた値
+  const isCoinsMode = chartMode === "coins";
+  const values = isCoinsMode ? coinValues : gachaValues;
+  const minV = isCoinsMode ? coinMin : 0;
+  const maxV = isCoinsMode ? coinMax : gachaMax;
   const range = maxV - minV || 1;
   const padding = range * 0.15;
+  const isUp = isCoinsMode ? coinIsUp : gachaTotal > 0;
 
   const W = containerWidth, H = 160, padX = 4, padY = 10;
   const chartW = W - padX * 2, chartH = H - padY * 2;
@@ -56,47 +79,63 @@ export function MiniChart({ data = [], onExpand }) {
     return H - padY - t * chartH;
   };
 
-  // 滑らかな曲線パス（カーブ）
-  const curvedPath = values.map((v, i) => {
+  // コインモード: 滑らかな曲線パス、ガチャモード: 棒グラフ
+  const curvedPath = isCoinsMode ? values.map((v, i) => {
     if (i === 0) return `M ${x(i)},${y(v)}`;
     const prevX = x(i - 1), prevY = y(values[i - 1]);
     const currX = x(i), currY = y(v);
     const cpX = (prevX + currX) / 2;
     return `C ${cpX},${prevY} ${cpX},${currY} ${currX},${currY}`;
-  }).join(" ");
+  }).join(" ") : "";
 
-  const areaPath = `M ${x(0)},${H - padY} L ${x(0)},${y(values[0])} ${values.slice(1).map((v, i) => {
+  const areaPath = isCoinsMode ? `M ${x(0)},${H - padY} L ${x(0)},${y(values[0])} ${values.slice(1).map((v, i) => {
     const prevX = x(i), prevY = y(values[i]);
     const currX = x(i + 1), currY = y(v);
     const cpX = (prevX + currX) / 2;
     return `C ${cpX},${prevY} ${cpX},${currY} ${currX},${currY}`;
-  }).join(" ")} L ${x(values.length - 1)},${H - padY} Z`;
+  }).join(" ")} L ${x(values.length - 1)},${H - padY} Z` : "";
 
   const firstDate = chartData[0]?.date_ymd?.slice(5) || "";
   const lastDate = chartData[chartData.length - 1]?.date_ymd?.slice(5) || "";
-  const trend = values[values.length - 1] - values[0];
-  const trendPercent = values[0] > 0 ? ((trend / values[0]) * 100).toFixed(1) : 0;
-  const isUp = trend >= 0;
 
   // アクティブなデータポイントの情報
   const activeData = activeIndex !== null ? chartData[activeIndex] : null;
   const activeValue = activeIndex !== null ? values[activeIndex] : null;
-  const activeDiff = activeIndex !== null && activeIndex > 0
+  const activeDiff = isCoinsMode && activeIndex !== null && activeIndex > 0
     ? values[activeIndex] - values[activeIndex - 1]
     : null;
 
+  // ガチャモードの棒グラフ用
+  const barWidth = Math.max(4, (chartW / values.length) * 0.6);
+
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
-      {/* ヘッダー */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-2">
-        <h3 className="font-semibold text-sm flex items-center gap-2">
-          {isUp ? (
-            <TrendingUp className="w-4 h-4 text-emerald-500" />
-          ) : (
-            <TrendingDown className="w-4 h-4 text-rose-500" />
-          )}
-          コイン推移
-        </h3>
+      {/* ヘッダー + タブ */}
+      <div className="flex items-center justify-between px-4 pt-3 pb-1">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setChartMode("coins")}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+              isCoinsMode
+                ? "bg-secondary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Coins className="w-3 h-3" />
+            コイン
+          </button>
+          <button
+            onClick={() => setChartMode("gacha")}
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
+              !isCoinsMode
+                ? "bg-secondary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            ガチャ
+          </button>
+        </div>
         <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={onExpand}>
           詳細
           <ChevronRight className="w-3 h-3" />
@@ -109,15 +148,19 @@ export function MiniChart({ data = [], onExpand }) {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs text-muted-foreground">{activeData.date_ymd}</p>
-              <p className="text-lg font-bold tabular-nums">{activeValue?.toLocaleString()} 枚</p>
+              <p className="text-lg font-bold tabular-nums">
+                {isCoinsMode
+                  ? `${activeValue?.toLocaleString()} 枚`
+                  : `${activeValue} 回`}
+              </p>
             </div>
             <div className="text-right">
-              {activeDiff !== null && (
+              {isCoinsMode && activeDiff !== null && (
                 <p className={`text-sm font-semibold ${activeDiff >= 0 ? "text-emerald-500" : "text-rose-500"}`}>
                   {activeDiff >= 0 ? "+" : ""}{activeDiff.toLocaleString()}
                 </p>
               )}
-              {activeData.gacha > 0 && (
+              {isCoinsMode && activeData.gacha > 0 && (
                 <p className="text-xs text-muted-foreground flex items-center gap-1 justify-end">
                   <Sparkles className="w-3 h-3" />
                   ガチャ {activeData.gacha}回
@@ -128,17 +171,33 @@ export function MiniChart({ data = [], onExpand }) {
         ) : (
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs text-muted-foreground">14日間の推移</p>
-              <p className="text-lg font-bold tabular-nums">{values[values.length - 1]?.toLocaleString()} 枚</p>
-            </div>
-            <div className={`text-right ${isUp ? "text-emerald-500" : "text-rose-500"}`}>
-              <p className="text-sm font-bold">
-                {isUp ? "+" : ""}{trend.toLocaleString()}
-              </p>
-              <p className="text-xs">
-                ({isUp ? "+" : ""}{trendPercent}%)
+              <p className="text-xs text-muted-foreground">14日間の{isCoinsMode ? "推移" : "合計"}</p>
+              <p className="text-lg font-bold tabular-nums">
+                {isCoinsMode
+                  ? `${coinValues[coinValues.length - 1]?.toLocaleString()} 枚`
+                  : `${gachaTotal} 回`}
               </p>
             </div>
+            {isCoinsMode ? (
+              <div className={`text-right ${coinIsUp ? "text-emerald-500" : "text-rose-500"}`}>
+                <p className="text-sm font-bold">
+                  {coinIsUp ? "+" : ""}{coinTrend.toLocaleString()}
+                </p>
+                <p className="text-xs">
+                  ({coinIsUp ? "+" : ""}{coinTrendPercent}%)
+                </p>
+              </div>
+            ) : (
+              <div className="text-right text-violet-500">
+                <p className="text-sm font-bold flex items-center gap-1 justify-end">
+                  <Sparkles className="w-3 h-3" />
+                  {gachaTotal > 0 ? `${gachaTotal}回` : "なし"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  平均 {(gachaTotal / chartData.length).toFixed(1)}回/日
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -154,8 +213,8 @@ export function MiniChart({ data = [], onExpand }) {
         >
           <defs>
             <linearGradient id="miniAreaGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-              <stop offset="0%" stopColor={isUp ? "#10b981" : "#f43f5e"} stopOpacity="0.25" />
-              <stop offset="100%" stopColor={isUp ? "#10b981" : "#f43f5e"} stopOpacity="0.02" />
+              <stop offset="0%" stopColor={isCoinsMode ? (isUp ? "#10b981" : "#f43f5e") : "#8b5cf6"} stopOpacity="0.25" />
+              <stop offset="100%" stopColor={isCoinsMode ? (isUp ? "#10b981" : "#f43f5e") : "#8b5cf6"} stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
@@ -173,48 +232,103 @@ export function MiniChart({ data = [], onExpand }) {
             />
           ))}
 
-          {/* エリア */}
-          <path d={areaPath} fill="url(#miniAreaGrad)" />
+          {isCoinsMode ? (
+            <>
+              {/* エリア */}
+              <path d={areaPath} fill="url(#miniAreaGrad)" />
 
-          {/* ライン */}
-          <path
-            d={curvedPath}
-            fill="none"
-            stroke={isUp ? "#10b981" : "#f43f5e"}
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-
-          {/* データポイント（インタラクティブ） */}
-          {values.map((v, i) => (
-            <g key={i}>
-              {/* タッチ/クリック領域（透明な大きい円） */}
-              <circle
-                cx={x(i)}
-                cy={y(v)}
-                r="16"
-                fill="transparent"
-                style={{ cursor: "pointer" }}
-                onMouseEnter={() => setActiveIndex(i)}
-                onTouchStart={() => setActiveIndex(i)}
-                onClick={() => setActiveIndex(i)}
-              />
-              {/* 表示用の小さい円 */}
-              <circle
-                cx={x(i)}
-                cy={y(v)}
-                r={activeIndex === i ? 6 : i === values.length - 1 ? 4 : 2.5}
-                fill={activeIndex === i ? (isUp ? "#10b981" : "#f43f5e") : "hsl(var(--card))"}
+              {/* ライン */}
+              <path
+                d={curvedPath}
+                fill="none"
                 stroke={isUp ? "#10b981" : "#f43f5e"}
-                strokeWidth={activeIndex === i ? 3 : 2}
-                style={{ transition: "r 0.15s ease" }}
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
-            </g>
-          ))}
 
-          {/* アクティブポイントの垂直線 */}
-          {activeIndex !== null && (
+              {/* データポイント（インタラクティブ） */}
+              {values.map((v, i) => (
+                <g key={i}>
+                  <circle
+                    cx={x(i)}
+                    cy={y(v)}
+                    r="16"
+                    fill="transparent"
+                    style={{ cursor: "pointer" }}
+                    onMouseEnter={() => setActiveIndex(i)}
+                    onTouchStart={() => setActiveIndex(i)}
+                    onClick={() => setActiveIndex(i)}
+                  />
+                  <circle
+                    cx={x(i)}
+                    cy={y(v)}
+                    r={activeIndex === i ? 6 : i === values.length - 1 ? 4 : 2.5}
+                    fill={activeIndex === i ? (isUp ? "#10b981" : "#f43f5e") : "hsl(var(--card))"}
+                    stroke={isUp ? "#10b981" : "#f43f5e"}
+                    strokeWidth={activeIndex === i ? 3 : 2}
+                    style={{ transition: "r 0.15s ease" }}
+                  />
+                </g>
+              ))}
+            </>
+          ) : (
+            <>
+              {/* ガチャ棒グラフ */}
+              {values.map((v, i) => {
+                const barHeight = v > 0 ? Math.max(4, (v / gachaMax) * (chartH - 10)) : 0;
+                const barX = x(i) - barWidth / 2;
+                const barY = H - padY - barHeight;
+
+                return (
+                  <g key={i}>
+                    {/* 棒 */}
+                    <rect
+                      x={barX}
+                      y={barY}
+                      width={barWidth}
+                      height={barHeight}
+                      rx="2"
+                      fill={activeIndex === i ? "#7c3aed" : "#8b5cf6"}
+                      opacity={activeIndex === i ? 1 : 0.7}
+                      style={{ cursor: "pointer", transition: "opacity 0.15s" }}
+                      onMouseEnter={() => setActiveIndex(i)}
+                      onTouchStart={() => setActiveIndex(i)}
+                      onClick={() => setActiveIndex(i)}
+                    />
+                    {/* タッチ領域 */}
+                    <rect
+                      x={barX - 8}
+                      y={padY}
+                      width={barWidth + 16}
+                      height={chartH}
+                      fill="transparent"
+                      style={{ cursor: "pointer" }}
+                      onMouseEnter={() => setActiveIndex(i)}
+                      onTouchStart={() => setActiveIndex(i)}
+                      onClick={() => setActiveIndex(i)}
+                    />
+                    {/* 値ラベル（0より大きい場合） */}
+                    {v > 0 && activeIndex === i && (
+                      <text
+                        x={x(i)}
+                        y={barY - 4}
+                        textAnchor="middle"
+                        fill="#7c3aed"
+                        fontSize="11"
+                        fontWeight="600"
+                      >
+                        {v}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </>
+          )}
+
+          {/* アクティブポイントの垂直線（コインモードのみ） */}
+          {isCoinsMode && activeIndex !== null && (
             <line
               x1={x(activeIndex)}
               y1={padY}

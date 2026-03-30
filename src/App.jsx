@@ -124,7 +124,8 @@ export default function App() {
   const [previewBoards, setPreviewBoards] = useState({
     earned: [],  // 稼いだ額
     period: [],  // 増減
-    raw: []      // コイン数
+    raw: [],     // コイン数
+    gacha: []    // ガチャ回数
   });
 
   // マイページの詳細セクション開閉
@@ -137,7 +138,8 @@ export default function App() {
     raw: { mode: "raw" },
     daily: { mode: "daily" },
     "7d": { mode: "period", periodDays: 7 },
-    "30d": { mode: "period", periodDays: 30 }
+    "30d": { mode: "period", periodDays: 30 },
+    gacha7d: { mode: "gacha", periodDays: 7 }
   };
 
   /* ---- 初期読み込み ---- */
@@ -221,15 +223,17 @@ export default function App() {
   const loadPreviewBoards = async () => {
     try {
       const baseOpts = todayYmd && canEdit ? { date: todayYmd } : {};
-      const [earnedRes, periodRes, rawRes] = await Promise.all([
+      const [earnedRes, periodRes, rawRes, gachaRes] = await Promise.all([
         api.board({ mode: "earned", periodDays: 7, ...baseOpts }),
         api.board({ mode: "period", periodDays: 7, ...baseOpts }),
-        api.board({ mode: "raw", ...baseOpts })
+        api.board({ mode: "raw", ...baseOpts }),
+        api.board({ mode: "gacha", periodDays: 7, ...baseOpts })
       ]);
       setPreviewBoards({
         earned: Array.isArray(earnedRes?.board) ? earnedRes.board : [],
         period: Array.isArray(periodRes?.board) ? periodRes.board : [],
-        raw: Array.isArray(rawRes?.board) ? rawRes.board : []
+        raw: Array.isArray(rawRes?.board) ? rawRes.board : [],
+        gacha: Array.isArray(gachaRes?.board) ? gachaRes.board : []
       });
     } catch (err) {
       console.warn("Failed to load preview boards:", err);

@@ -1,8 +1,8 @@
 // src/components/dashboard/RankingPreview.jsx
-// 7日間ランキング - タブ切り替え（稼いだ額/増減/コイン数）
+// 7日間ランキング - タブ切り替え（稼いだ額/増減/コイン数/ガチャ回数）
 
 import { useState } from "react";
-import { Trophy, ChevronRight, Coins, Crown, TrendingUp, Wallet } from "lucide-react";
+import { Trophy, ChevronRight, Coins, Crown, TrendingUp, Wallet, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const MEDAL = ["🥇", "🥈", "🥉"];
@@ -17,7 +17,8 @@ const formatDate = (ymd) => {
 const TAB_CONFIG = {
   earned: { label: "稼いだ額", icon: Wallet, unit: "枚", showPlus: true },
   period: { label: "増減", icon: TrendingUp, unit: "枚", showPlus: true },
-  raw: { label: "コイン数", icon: Coins, unit: "枚", showPlus: false }
+  raw: { label: "コイン数", icon: Coins, unit: "枚", showPlus: false },
+  gacha: { label: "ガチャ", icon: Sparkles, unit: "回", showPlus: false }
 };
 
 export function RankingPreview({ myName, boards = {}, periodDays = 7, periodEnd, onViewFull }) {
@@ -69,7 +70,7 @@ export function RankingPreview({ myName, boards = {}, periodDays = 7, periodEnd,
           <Trophy className="w-4 h-4 text-muted-foreground" />
           <span>
             {activeTab === "raw" ? "ランキング" : `${periodDays}日間ランキング`}
-            {activeTab !== "raw" && periodLabel && (
+            {activeTab !== "raw" && activeTab !== "gacha" && periodLabel && (
               <span className="text-muted-foreground font-normal ml-1">（{periodLabel}）</span>
             )}
           </span>
@@ -105,7 +106,7 @@ export function RankingPreview({ myName, boards = {}, periodDays = 7, periodEnd,
             <div className="flex items-center gap-2 mb-2">
               <Crown className="w-5 h-5 text-amber-500" />
               <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-                {activeTab === "raw" ? "コイン数" : `${periodDays}日間`}の1位
+                {activeTab === "raw" ? "コイン数" : activeTab === "gacha" ? "ガチャ回数" : `${periodDays}日間`}の1位
               </span>
             </div>
             <div className="flex items-center justify-between">

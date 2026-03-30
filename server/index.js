@@ -570,13 +570,14 @@ app.patch("/api/coins/:date", auth, async (req, res) => {
 /* ============= ランキング（数値）：/api/board =============
    クエリ:
      date=YYYY-MM-DD（省略時は JST 今日）
-     mode=raw|daily|period|earned（既定: daily）
-     periodDays=7（mode=period|earned の窓幅）
+     mode=raw|daily|period|earned|gacha（既定: daily）
+     periodDays=7（mode=period|earned|gacha の窓幅）
    定義:
      raw    = 指定日までの最新値
      daily  = 指定日の前日比
      period = 期間内に"存在する記録同士"の前日差(diff)を合計
      earned = 期間内に純粋に稼いだ額（diff + spent）を合計
+     gacha  = 期間内のガチャ回数合計
    ※ N+1 問題を解消：全データを2クエリで取得しメモリ上で計算
 ============================================================= */
 app.get("/api/board", async (req, res) => {
@@ -626,6 +627,10 @@ app.get("/api/board", async (req, res) => {
         const last = logs.length > 0 ? logs[logs.length - 1].coins : 0;
         const prev = logs.length > 1 ? logs[logs.length - 2].coins : 0;
         value = last - prev;
+      } else if (mode === "gacha") {
+        // 期間内のガチャ回数合計
+        const periodLogs = logs.filter(l => l.date_ymd >= startDate && l.date_ymd <= date);
+        value = periodLogs.reduce((sum, r) => sum + r.gacha, 0);
       } else if (mode === "period" || mode === "earned") {
         // 期間の1日前からフィルタ（期間最初の日のdiff計算用）
         const dayBefore = addDays(startDate, -1);
@@ -668,8 +673,8 @@ app.get("/api/board", async (req, res) => {
 
 /* =========== ランキング（折れ線グラフ）：/api/board_series ===========
    クエリ:
-     mode=raw|daily|period|earned（既定: daily）
-     periodDays=7（mode=period|earned の窓幅）
+     mode=raw|daily|period|earned|gacha（既定: daily）
+     periodDays=7（mode=period|earned|gacha の窓幅）
      days=14（系列に含める日数）
      top=5（上位N名）
      date=YYYY-MM-DD（終端日。省略時は lastFinalizedYmd()）
@@ -752,10 +757,19 @@ app.get("/api/board_series", async (req, res) => {
         return sum;
       });
 
+      // ガチャ回数の期間合計
+      const valuesGacha = gachaByDate.map((_, i) => {
+        let sum = 0;
+        const from = Math.max(0, i - (periodDays - 1));
+        for (let j = from; j <= i; j++) sum += gachaByDate[j];
+        return sum;
+      });
+
       const picked =
         mode === "raw" ? valuesRaw :
         mode === "daily" ? valuesDaily :
         mode === "earned" ? valuesEarned :
+        mode === "gacha" ? valuesGacha :
         valuesPeriod;
 
       return {

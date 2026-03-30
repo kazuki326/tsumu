@@ -1,8 +1,8 @@
 // src/components/Leaderboard.jsx
-// 全体ランキング：タブ5種（7日稼ぎ/コイン数/前日比/7日増減/30日増減）
+// 全体ランキング：タブ6種（7日稼ぎ/コイン数/前日比/7日増減/30日増減/ガチャ）
 
 import { useEffect, useMemo, useState } from "react";
-import { Trophy, TrendingUp, Coins, Calendar, BarChart3 } from "lucide-react";
+import { Trophy, TrendingUp, Coins, Calendar, BarChart3, Sparkles } from "lucide-react";
 import { api } from "../api";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ export function Leaderboard({
     if (boardTab === "7d")    return { mode: "period", periodDays: 7,  days: 28, top: 5, date: boardDate };
     if (boardTab === "30d")   return { mode: "period", periodDays: 30, days: 60, top: 5, date: boardDate };
     if (boardTab === "raw")   return { mode: "raw", days: 28, top: 5, date: boardDate };
+    if (boardTab === "gacha7d") return { mode: "gacha", periodDays: 7, days: 28, top: 5, date: boardDate };
     return null;
   }, [boardTab, boardDate]);
 
@@ -79,10 +80,14 @@ export function Leaderboard({
             <Calendar className="w-3 h-3 mr-1" />
             30日間
           </TabsTrigger>
+          <TabsTrigger value="gacha7d" className="text-xs px-3 py-2">
+            <Sparkles className="w-3 h-3 mr-1" />
+            ガチャ
+          </TabsTrigger>
         </TabsList>
 
         {/* 全タブ共通：ランキング棒バー + グラフ（下に配置） */}
-        {["earned7d", "raw", "daily", "7d", "30d"].map((tab) => (
+        {["earned7d", "raw", "daily", "7d", "30d", "gacha7d"].map((tab) => (
           <TabsContent key={tab} value={tab} className="mt-4 space-y-4">
             {/* ランキング棒バー（上） */}
             <div className="border border-border rounded-xl overflow-hidden bg-card">
@@ -90,10 +95,12 @@ export function Leaderboard({
                 <h4 className="text-sm font-semibold flex items-center gap-2">
                   {tab === "raw" ? (
                     <Coins className="w-4 h-4 text-muted-foreground" />
+                  ) : tab === "gacha7d" ? (
+                    <Sparkles className="w-4 h-4 text-muted-foreground" />
                   ) : (
                     <Trophy className="w-4 h-4 text-muted-foreground" />
                   )}
-                  {tab === "raw" ? "コイン数ランキング" : "ランキング（現時点）"}
+                  {tab === "raw" ? "コイン数ランキング" : tab === "gacha7d" ? "ガチャ回数ランキング（7日間）" : "ランキング（現時点）"}
                 </h4>
               </div>
               <div className="p-4">
@@ -106,7 +113,7 @@ export function Leaderboard({
               <div className="flex items-center gap-2 mb-3">
                 <BarChart3 className="w-4 h-4 text-indigo-500" />
                 <h4 className="text-sm font-semibold">
-                  {tab === "raw" ? "コイン数推移" : "トレンドグラフ"}
+                  {tab === "raw" ? "コイン数推移" : tab === "gacha7d" ? "ガチャ回数推移" : "トレンドグラフ"}
                 </h4>
               </div>
               {loading ? (
@@ -144,6 +151,7 @@ function labelForTab(tab) {
   if (tab === "daily") return "枚（前日比）";
   if (tab === "7d") return "枚/7日";
   if (tab === "30d") return "枚/30日";
+  if (tab === "gacha7d") return "回（7日間）";
   return "枚";
 }
 
